@@ -1,0 +1,7 @@
+# AI 团队群聊 · 桌面版 依赖清单
+# 安装：pip install -r requirements.txt
+pyside6>=6.6
+autogen-agentchat>=0.4
+autogen-ext[ollama]>=0.4
+python-dotenv>=1.0
+openai>=1.30

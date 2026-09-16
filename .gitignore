@@ -1,0 +1,17 @@
+# 密钥与本地数据——永不提交
+.env
+*.env
+!*.example
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 运行时生成
+output/
+history/
+team_settings.json
+
+# 本地杂项
+*.log
+desktop_err.log
