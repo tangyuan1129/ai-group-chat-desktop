@@ -14,7 +14,9 @@
 
 ## 怎么装
 
-需要 Python 3.10+（建议 3.11/3.12），本地模型还需要装 [Ollama](https://ollama.com)（不装也能用，只是少一个本地模型）。
+**最省事的方式**：去 [Releases 页面](https://github.com/tangyuan1129/ai-group-chat-desktop/releases) 下载 `AI团队群聊-安装程序-v1.1.exe`，双击安装就行——会自动装到 D 盘、在桌面和开始菜单建好快捷方式，还带卸载程序，不需要自己配 Python 环境。
+
+想折腾的话也可以直接跑源码，需要 Python 3.10+（建议 3.11/3.12），本地模型还需要装 [Ollama](https://ollama.com)（不装也能用，只是少一个本地模型）：
 
 ```bat
 pip install -r requirements.txt
