@@ -205,6 +205,62 @@ DANGEROUS_PATTERNS = [
     r"\bMove-Item\b", r"\bCopy-Item\b", r"\bNew-Item\b", r"\bRemove-Item\b",
 ]
 
+# ── 只读白名单：只放行查询类指令 ────────────────────────────────
+# 黑名单只能"已知的坏"，白名单才能挡住"未知的坏"（比如 Start-Process 拉起程序）。
+# 策略：能识别出 cmdlet 就必须全部在白名单内；识别不出（表达式、纯文本、外部命令）
+# 则退回黑名单兜底，避免误伤正常命令。可用环境变量 AIGC_CMD_WHITELIST=0 关闭白名单。
+ALLOWED_CMDLETS = (
+    "Get-*",              # 所有查询类 Get-*
+    "Select-Object", "Where-Object", "Sort-Object", "Measure-Object",
+    "Group-Object", "Compare-Object", "ForEach-Object",
+    "Format-Table", "Format-List", "Format-Wide", "Format-Custom",
+    "Out-String", "Out-Default", "Out-Null",
+    "ConvertTo-Json", "ConvertFrom-Json", "ConvertTo-Csv", "ConvertTo-Html",
+    "Write-Output", "Write-Host",
+    "Test-Path", "Test-Connection", "Test-NetConnection",
+    "Resolve-Path", "Join-Path", "Split-Path", "Select-String",
+)
+
+# 白名单之外的常见只读外部命令（不带 Verb-Noun 形式，单独列出）
+EXTERNAL_READONLY = (
+    "ping", "ipconfig", "netstat", "whoami", "systeminfo", "hostname",
+    "type", "echo", "dir", "findstr", "where",
+)
+
+
+def _iter_command_tokens(command: str):
+    """把命令按 | ; & 换行分段，取每段开头的指令名。"""
+    for seg in re.split(r"[|;&\n]+", command):
+        seg = seg.strip()
+        while seg.startswith("("):        # 去掉 (Get-...).Property 这类左括号
+            seg = seg[1:].lstrip()
+        m = re.match(r"^\$[A-Za-z0-9_]+\s*=\s*", seg)   # 去掉 $x = ... 赋值前缀
+        if m:
+            seg = seg[m.end():].lstrip()
+        if seg:
+            yield re.split(r"\s", seg, 1)[0]
+
+
+def _is_cmdlet_like(token: str) -> bool:
+    """判断 token 是否是可判定的指令（Verb-Noun 形式，或已知外部命令）。"""
+    if re.match(r"^[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)+$", token):
+        return True
+    return token.lower() in EXTERNAL_READONLY
+
+
+def _allowed_cmdlet(token: str) -> bool:
+    low = token.lower()
+    if low in EXTERNAL_READONLY:
+        return True
+    for pat in ALLOWED_CMDLETS:
+        if pat.endswith("-*"):
+            if low.startswith(pat[:-1].lower()):
+                return True
+        elif low == pat.lower():
+            return True
+    return False
+
+
 def run_powershell(command: str) -> str:
     """执行 PowerShell 命令并返回输出。仅允许只读/查询类命令（删除、写入等危险操作被拒绝）。"""
     if not command or not command.strip():
@@ -215,6 +271,16 @@ def run_powershell(command: str) -> str:
     for pat in DANGEROUS_PATTERNS:
         if re.search(pat, command, re.I):
             return f"已拒绝危险命令：{command}（工具为只读保护，不允许删除/写入/关机等操作）"
+    # 白名单：识别不出任何指令时（表达式、纯文本等）跳过，由上面的黑名单兜底
+    if os.environ.get("AIGC_CMD_WHITELIST", "1") != "0":
+        judged = [t for t in _iter_command_tokens(command) if _is_cmdlet_like(t)]
+        if judged:
+            bad = sorted({t for t in judged if not _allowed_cmdlet(t)})
+            if bad:
+                return (f"已拒绝非只读命令：{command}\n"
+                        f"未获许可的指令：{', '.join(bad)}\n"
+                        f"该工具只允许查询类命令（Get-*、Select-Object、Where-Object、"
+                        f"Format-*、ping、ipconfig 等）。")
     try:
         # 强制 PowerShell 以 UTF-8 输出：中文 Windows 默认 GBK，不指定 encoding
         # 会让 subprocess 的读线程抛 UnicodeDecodeError，stdout 静默变空（工具恒返回"无输出"）
@@ -248,5 +314,5 @@ def build_tools():
     tools["write_text_file"] = FunctionTool(write_text_file, description="把内容写入工作目录下的文本文件（自动建目录）。参数：path 相对路径, content 完整内容。可用于保存方案、行程、清单。")
     tools["list_files"] = FunctionTool(list_files, description="列出工作目录下的文件。参数：dir_path 可选子目录。")
     tools["github_api"] = FunctionTool(github_api, description="调用 GitHub REST API：查仓库、搜代码/项目、看 Issues/PR。参数：method(GET等), endpoint(如 /search/repositories?q=xxx), payload(可选)。")
-    tools["run_powershell"] = FunctionTool(run_powershell, description="执行只读 PowerShell 命令查系统信息（如查看进程、文件、网络）。禁止写入/删除/关机类操作（已内置拦截）。")
+    tools["run_powershell"] = FunctionTool(run_powershell, description="执行只读命令查系统信息（看进程/文件/网络等）。只允许查询类指令：Get-*、Select-Object、Where-Object、Format-*、ping、ipconfig 等；写入/删除/启动程序类一律拒绝。")
     return tools
