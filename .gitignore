@@ -15,6 +15,7 @@ team_settings.json
 # 本地杂项
 *.log
 desktop_err.log
+*.bak
 
 # 打包产物（体积大，不入库）
 build/

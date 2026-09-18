@@ -48,8 +48,12 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 
 # ── 2. 文件读写（限定在工作根目录内）────────────────────────────
-# 工作目录默认为程序同目录下的 output 文件夹，可自行修改
-WORK_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"))
+# 工作目录为程序同目录下的 output 文件夹；可用环境变量 AIGC_WORK_ROOT 覆盖，
+# 这样开发版与发布版可以共用同一份源码（发布版不需要任何路径改写）。
+WORK_ROOT = os.path.normpath(
+    os.environ.get("AIGC_WORK_ROOT")
+    or os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+)
 
 def _safe_path(path: str) -> str:
     """把相对路径限制在 WORK_ROOT 下，防止越权访问任意系统文件。"""
@@ -127,12 +131,14 @@ def github_api(method: str, endpoint: str, payload: dict = None) -> str:
 
 
 def _read_plugin_token() -> str:
-    """尝试读取用户自定义的 GitHub Token（两个可配置位置：环境变量或 .env）。"""
-    # 1) 环境变量 GITHUB_TOKEN
+    """GitHub Token 读取优先级（取第一个非空）：
+    1) 环境变量 GITHUB_TOKEN
+    2) 程序同目录 .env 里的 GITHUB_TOKEN=
+    3) 环境变量 DSH_GITHUB_AUTH_FILE 指向的插件凭据 json（可选；用变量传路径以免硬编码）
+    """
     t = os.environ.get("GITHUB_TOKEN", "")
     if t:
         return t
-    # 2) 程序同目录 .env 里的 GITHUB_TOKEN=（可选配置）
     try:
         env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
         if os.path.exists(env_file):
@@ -140,9 +146,20 @@ def _read_plugin_token() -> str:
                 for line in f:
                     line = line.strip()
                     if line.startswith("GITHUB_TOKEN="):
-                        return line.split("=", 1)[1].strip().strip('"').strip("'")
+                        v = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        if v:
+                            return v
     except Exception:
-        return ""
+        pass
+    auth_file = os.environ.get("DSH_GITHUB_AUTH_FILE", "")
+    if auth_file and os.path.exists(auth_file):
+        try:
+            with open(auth_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            t = data.get("token", "")
+            return t if isinstance(t, str) else ""
+        except Exception:
+            return ""
     return ""
 
 
@@ -178,7 +195,11 @@ def _summarize_github(obj) -> str:
 
 # ── 4. 执行 PowerShell（危险命令只读保护）────────────────────────
 DANGEROUS_PATTERNS = [
-    r"\brm\s+-rf\b", r"\bRemove-Item\b", r"\bdel\s+/", r"\bformat\s", r"\bkill\b",
+    r"\brm\s+-rf\b", r"\bRemove-Item\b", r"\bdel\s+/",
+    # 注意：不可写成 \bformat\s —— 会误杀 `Get-Date -Format yyyy-MM-dd` 这类只读命令
+    r"\bformat-(volume|disk)\b", r"\bformat\s+[a-z]:",
+    # 同理，\bkill\b 会误杀含 kill 字样的路径/进程名，改为精确匹配
+    r"\btaskkill\b", r"\bkill\s+-9\b",
     r"\bStop-Process\b", r"\breg\s+delete\b", r"\bshutdown\b", r"\brmdir\b",
     r"\bClear-Content\b", r"\bSet-Content\b", r"\bAdd-Content\b", r"\bOut-File\b",
     r"\bMove-Item\b", r"\bCopy-Item\b", r"\bNew-Item\b", r"\bRemove-Item\b",
@@ -195,9 +216,14 @@ def run_powershell(command: str) -> str:
         if re.search(pat, command, re.I):
             return f"已拒绝危险命令：{command}（工具为只读保护，不允许删除/写入/关机等操作）"
     try:
+        # 强制 PowerShell 以 UTF-8 输出：中文 Windows 默认 GBK，不指定 encoding
+        # 会让 subprocess 的读线程抛 UnicodeDecodeError，stdout 静默变空（工具恒返回"无输出"）
+        ps_cmd = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
+                  "$OutputEncoding=[Text.Encoding]::UTF8;" + command)
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
-            capture_output=True, text=True, timeout=60,
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=60,
         )
         out = (result.stdout or "")[:4000]
         err = (result.stderr or "")[:1000]

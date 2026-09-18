@@ -24,8 +24,9 @@ from PySide6.QtWidgets import (
 
 # ── 路径与常量 ─────────────────────────────────────────────────
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-# 智谱 API Key 放在程序同目录的 .env 文件中（格式见 .env.example）
-ENV_FILE = os.path.join(APP_DIR, ".env")
+# 智谱 API Key 放在程序同目录的 .env 文件中（格式见 .env.example）；
+# 本地开发时可用环境变量 AIGC_ENV_FILE 指向其它位置的 .env
+ENV_FILE = os.environ.get("AIGC_ENV_FILE") or os.path.join(APP_DIR, ".env")
 SETTINGS_FILE = os.path.join(APP_DIR, "team_settings.json")
 HISTORY_DIR = os.path.join(APP_DIR, "history")
 ZHIPU_BASE = "https://api.z.ai/api/paas/v4"
@@ -518,7 +519,15 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AI 团队群聊 · 桌面版")
         self.setMinimumSize(880, 660)
         try:
-            self.setWindowIcon(QIcon(os.path.join(APP_DIR, "ai_group.ico")))
+            # 兼容两种图标命名：v1.1 起打包的是 app.ico，旧版曾引用 ai_group.ico
+            icon_path = next(
+                (p for p in (os.path.join(APP_DIR, "app.ico"),
+                             os.path.join(APP_DIR, "ai_group.ico"))
+                 if os.path.exists(p)),
+                None,
+            )
+            if icon_path:
+                self.setWindowIcon(QIcon(icon_path))
         except Exception:
             pass
         self._build_ui()
