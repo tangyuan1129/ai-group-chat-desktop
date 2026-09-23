@@ -38,9 +38,13 @@ pip install -r requirements.txt
 
 ## 📸 界面预览
 
-(运行后截图补在这里——主界面 + 一次群聊讨论的效果图)
+截图请放入仓库的 `screenshots/` 目录,然后在下面引用(名称对应即可):
 
-## ➠／ 注意事项
+![主界面](screenshots/main.png)
+
+![群聊讨论](screenshots/discussion.png)
+
+## ⚠️ 注意事项
 
 - AI 的工具只能读写程序目录下的 `output` 文件夹,删文件、关机这类危险命令被拦掉了
 - 智谱免费接口偶尔限流(429),程序会自动等一会儿重试,不用管它
