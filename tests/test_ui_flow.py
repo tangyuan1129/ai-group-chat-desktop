@@ -83,6 +83,15 @@ def assistant_texts(win):
     return [w.text for w in area_widgets(win) if isinstance(w, desktop_app.AssistantMessage)]
 
 
+def empty_text(win) -> str:
+    """空状态（标题/示例/缺配置提示）现在挂在 win.empty_block 上，不在消息区里。"""
+    parts = []
+    for lbl in win.empty_block.findChildren(QLabel):
+        if lbl.text():
+            parts.append(lbl.text())
+    return "\n".join(parts)
+
+
 def new_window(**team_kwargs):
     holder = {}
     team_session.build_team = make_build_team(holder, **team_kwargs)
@@ -97,9 +106,9 @@ print("A. 配置不完整：不弹教程向导，在对话流里给一条可操�
 print("=" * 72)
 win, holder = new_window()
 check("需要配置（needs_setup）", win.load_result.needs_setup)
-check("对话流里有提示", "还差" in area_text(win), area_text(win)[:200])
-check("提示里点明缺什么", "API Key" in area_text(win), area_text(win)[:200])
-check("有空状态引导", "有什么可以帮你的" in area_text(win), area_text(win)[:200])
+check("空状态里有缺配置提示", "还差" in empty_text(win), empty_text(win)[:200])
+check("提示里点明缺什么", "API Key" in empty_text(win), empty_text(win)[:200])
+check("有空状态引导", "有什么可以帮你的" in empty_text(win), empty_text(win)[:200])
 check("侧栏有历史分组或为空", win.sidebar.history.count() >= 0)
 
 print()
@@ -171,7 +180,7 @@ print("E. 新对话：清空上下文")
 print("=" * 72)
 win.start_new_conversation()
 check("新对话后不再带上下文", not win.session.has_context)
-check("回到空状态", "有什么可以帮你的" in area_text(win), area_text(win)[:150])
+check("回到空状态", "有什么可以帮你的" in empty_text(win), empty_text(win)[:150])
 check("标题回到新对话", win.title_label.text() == "新对话", win.title_label.text())
 check("输入框提示改回任务", "追问" not in win.composer.input.placeholderText(),
       win.composer.input.placeholderText())

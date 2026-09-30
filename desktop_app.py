@@ -207,9 +207,14 @@ class SystemMessage(QWidget):
 
 
 class NoticeMessage(QWidget):
-    """带一个动作按钮的提示（例如"配置不完整 → 去配置"）。"""
+    """带一个动作按钮的提示（例如"配置不完整 → 去配置"）。
 
-    def __init__(self, text: str, action_text: str, on_action, parent=None):
+    width 不为空时整体限宽，并按可用空间把文字折行 —— 否则开了 wordWrap 的
+    QLabel 会给出偏大的 sizeHint，把整条提示顶得比旁边的示例芯片还宽。
+    """
+
+    def __init__(self, text: str, action_text: str, on_action,
+                 width: int = None, parent=None):
         super().__init__(parent)
         frame = QFrame()
         frame.setStyleSheet(
@@ -218,7 +223,11 @@ class NoticeMessage(QWidget):
         inner = QHBoxLayout(frame)
         inner.setContentsMargins(14, 10, 10, 10)
         inner.setSpacing(10)
-        inner.addWidget(label(text, "dim", wrap=True), stretch=1)
+        body = label(text, "dim", wrap=True)
+        if width:
+            self.setFixedWidth(width)
+            body.setFixedWidth(max(120, width - 150))   # 给按钮和留白让出空间
+        inner.addWidget(body, stretch=1)
         inner.addWidget(button(action_text, "primary", on_action))
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 8, 0, 8)
@@ -1129,8 +1138,24 @@ class MainWindow(QMainWindow):
         top_row.addWidget(self.more_btn)
         column.addWidget(top)
 
+        # 布局骨架（顺序很关键）：
+        #   顶栏 / 上弹簧 / 空状态块 / 消息区 / 输入区 / 下弹簧
+        # 空状态时两个弹簧都撑开，把「标题+示例+输入框」顶到竖直居中；
+        # 开始对话后上弹簧收掉、消息区撑开，输入框自然落到底部。
+        self.column = column
+
+        column.addStretch(1)
+        self._i_stretch_top = column.count() - 1
+
+        self.empty_block = QWidget()
+        self.empty_layout = QVBoxLayout(self.empty_block)
+        self.empty_layout.setContentsMargins(24, 0, 24, 0)
+        self.empty_layout.setSpacing(0)
+        column.addWidget(self.empty_block)
+
         self.area = MessageArea()
         column.addWidget(self.area, stretch=1)
+        self._i_area = column.count() - 1
 
         # 输入区：居中限宽，和正文对齐
         wrap = QWidget()
@@ -1147,6 +1172,10 @@ class MainWindow(QMainWindow):
         bottom = CenteredPane(wrap, margin=24)
         bottom.setContentsMargins(0, 6, 0, 14)
         column.addWidget(bottom)
+        self._i_bottom = column.count() - 1
+
+        column.addStretch(1)
+        self._i_stretch_bottom = column.count() - 1
 
         root.addWidget(content, stretch=1)
         self.setCentralWidget(central)
@@ -1158,21 +1187,82 @@ class MainWindow(QMainWindow):
     def _reload_sidebar(self):
         self.sidebar.reload_history(list_history())
 
+    def _set_empty_layout(self, empty: bool):
+        """在「空状态」和「对话中」两种骨架之间切换。"""
+        self.empty_block.setVisible(empty)
+        self.area.setVisible(not empty)
+        self.column.setStretch(self._i_stretch_top, 1 if empty else 0)
+        self.column.setStretch(self._i_stretch_bottom, 1 if empty else 0)
+        self.column.setStretch(self._i_area, 0 if empty else 1)
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def _build_empty_state(self):
+        """空状态：一句招呼 + 几个可点的示例 + 缺配置时的提示条。
+
+        它和输入框一起竖直居中 —— 这样中间不会空出一大块。
+        """
+        self._clear_layout(self.empty_layout)
+
+        heading = label("有什么可以帮你的？", "empty")
+        heading.setAlignment(Qt.AlignCenter)
+        self.empty_layout.addSpacing(4)
+        self.empty_layout.addWidget(heading)
+        self.empty_layout.addSpacing(22)
+
+        chips = QWidget()
+        chip_layout = QVBoxLayout(chips)
+        chip_layout.setContentsMargins(0, 0, 0, 0)
+        chip_layout.setSpacing(8)
+        for hint in EMPTY_HINTS:
+            chip = button(hint, on_click=lambda _=False, h=hint: self._use_hint(h))
+            chip.setStyleSheet(
+                "QPushButton { background: %s; color: %s; border: 1px solid %s;"
+                "border-radius: 14px; padding: 11px 16px; font-size: 10pt;"
+                "text-align: left; }"
+                "QPushButton:hover { background: %s; border-color: %s; color: %s; }"
+                % (theme.SURFACE, theme.TEXT_DIM, theme.BORDER,
+                   theme.SURFACE_ACTIVE, theme.BORDER_STRONG, theme.TEXT))
+            chip_layout.addWidget(chip)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch(1)
+        chips.setFixedWidth(min(560, theme.CONTENT_MAX_WIDTH))
+        row.addWidget(chips)
+        row.addStretch(1)
+        self.empty_layout.addLayout(row)
+
+        problems = self.load_result.problems
+        if problems:
+            self.empty_layout.addSpacing(20)
+            notice_row = QHBoxLayout()
+            notice_row.setContentsMargins(0, 0, 0, 0)
+            notice_row.addStretch(1)
+            notice = NoticeMessage(
+                "还差 %d 项就能开始了：%s" % (len(problems), "；".join(problems[:2])),
+                "去配置", self.open_config,
+                width=min(560, theme.CONTENT_MAX_WIDTH))
+            notice_row.addWidget(notice)
+            notice_row.addStretch(1)
+            self.empty_layout.addLayout(notice_row)
+
     def _start_fresh_view(self):
         self._refresh_team_label()
         self._reload_sidebar()
-        problems = self.load_result.problems
         self.area.clear()
-        self.area.show_empty_state("有什么可以帮你的？", EMPTY_HINTS, self._use_hint)
+        self._build_empty_state()
+        self._set_empty_layout(True)
         if self.load_result.recovered:
-            self.area.add_system("上次的配置文件损坏了，已备份为 %s 并恢复默认配置。"
-                                 % os.path.basename(self.load_result.backup_path or "备份文件"))
-        for note in self.load_result.notes:
-            self.area.add_system(note)
-        if problems:
-            self.area.add_notice(
-                "还差 %d 项就能开始了：%s" % (len(problems), "；".join(problems[:2])),
-                "去配置", self.open_config)
+            self.status.setText("上次的配置文件损坏了，已备份并恢复默认配置。")
+        elif self.load_result.notes:
+            self.status.setText(self.load_result.notes[0])
+        else:
+            self.status.setText("就绪")
         self._update_placeholder()
 
     def _use_hint(self, text: str):
@@ -1217,6 +1307,7 @@ class MainWindow(QMainWindow):
         is_followup = session.has_context
         if not is_followup:
             self.area.clear()
+            self._set_empty_layout(False)
             self.cur_task = task
             self.cur_messages = [{"kind": "user", "name": "我", "content": task}]
             self.title_label.setText(task[:26] + ("…" if len(task) > 26 else ""))
@@ -1265,6 +1356,7 @@ class MainWindow(QMainWindow):
         self.composer.input.setEnabled(False)
         self.title_label.setText(data.get("task", "历史记录")[:26])
         self.area.clear()
+        self._set_empty_layout(False)
         self.area.add_system("这是 %s 的历史记录（只读）。点侧栏「＋ 新对话」回到当前对话。"
                              % data.get("time", ""))
         self.area.add_user(data.get("task", ""))
