@@ -42,7 +42,7 @@ for mod in ["autogen_ext.models.ollama", "autogen_ext.models.openai",
 
 # 本项目自己的模块，显式列一遍更保险
 hidden += ["app_config", "app_logging", "secret_store", "team_session",
-           "llm", "onboarding", "tools"]
+           "llm", "theme", "tools"]
 
 # 图标随包带上，运行时按文件名查找
 for asset in ("app.ico", "logo.png"):

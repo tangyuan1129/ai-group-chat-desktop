@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """主界面端到端流程：发送 → 流式渲染 → 追问 → 停止 → 新会话。
 
 这是产品最核心的那条路径。用仿真团队替掉真实模型，全程不联网。
@@ -58,19 +58,24 @@ def new_window(**team_kwargs):
     holder = {}
     team_session.build_team = make_build_team(holder, **team_kwargs)
     load_result = app_config.load_settings(migrate=False)
-    win = desktop_app.MainWindow(load_result, auto_onboard=False)
+    win = desktop_app.MainWindow(load_result)
     win.resize(1000, 700)
     return win, holder
 
 
 print("=" * 72)
-print("A. 首次启动：缺配置时不弹崩溃，而是明确提示该配什么")
+print("A. 配置不完整：不弹教程向导，只挂一条可关闭的提示条")
 print("=" * 72)
 win, holder = new_window()
-text = win.chat_view.toPlainText()
-check("界面提示了缺少 API Key", "API Key" in text, text[-200:])
-check("需要引导（needs_onboarding）", win.load_result.needs_onboarding)
-check("auto_onboard=False 时没有弹窗卡住", True)
+check("需要配置（needs_setup）", win.load_result.needs_setup)
+check("顶部提示条可见", not win.banner.isHidden())
+check("提示条说清了缺什么", "API Key" in win.banner_label.text(),
+      win.banner_label.text())
+check("对话区提示去配置", "去配置" in win.chat_view.toPlainText(),
+      win.chat_view.toPlainText()[-200:])
+win.banner.hide()
+check("提示条可以关掉", win.banner.isHidden())
+win.banner.show()
 
 print()
 print("=" * 72)
@@ -87,9 +92,9 @@ check("本轮跑完", pump(8.0, until=lambda: win.send_btn.isEnabled()),
 body = win.chat_view.toPlainText()
 check("任务原文在界面上", "推荐大学生宿舍" in body)
 check("AI 发言已渲染", "第1轮发言1" in body, body[-300:])
-check("发言带角色名", "【经理】" in body or "【策划】" in body, body[-300:])
+check("发言带角色名", "经理" in body or "策划" in body, body[-300:])
 check("结束后输入框恢复", win.task_input.isEnabled())
-check("结束后状态回到空闲", "空闲" in win.status.text(), win.status.text())
+check("结束后状态提示可继续追问", "追问" in win.status.text(), win.status.text())
 check("会话带着上下文", win.session.has_context)
 check("输入框提示改成追问", "追问" in win.task_input.placeholderText(),
       win.task_input.placeholderText())
@@ -155,7 +160,7 @@ print("=" * 72)
 win.close()
 holder = {}
 team_session.build_team = make_build_team(holder, team_factory=FakeToolEventTeam)
-win = desktop_app.MainWindow(app_config.load_settings(migrate=False), auto_onboard=False)
+win = desktop_app.MainWindow(app_config.load_settings(migrate=False), )
 win.task_input.setText("帮我查点资料")
 win.send()
 pump(8.0, until=lambda: win.send_btn.isEnabled())
@@ -176,7 +181,7 @@ def boom(settings, clients, external):
 
 
 team_session.build_team = boom
-win = desktop_app.MainWindow(app_config.load_settings(migrate=False), auto_onboard=False)
+win = desktop_app.MainWindow(app_config.load_settings(migrate=False), )
 win.task_input.setText("会失败的任务")
 win.send()
 check("出错后界面复位", pump(10.0, until=lambda: win.send_btn.isEnabled()),

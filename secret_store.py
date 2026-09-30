@@ -120,15 +120,23 @@ def decrypt_value(value: str) -> str:
     return unprotect(value)
 
 
+def _iter_role_dicts(settings: dict):
+    """roles 在 v3 里是有序列表，在 v2 里是字典 —— 两种都要能遍历。"""
+    roles = settings.get("roles")
+    if isinstance(roles, list):
+        return [r for r in roles if isinstance(r, dict)]
+    if isinstance(roles, dict):
+        return [r for r in roles.values() if isinstance(r, dict)]
+    return []
+
+
 def encrypt_settings(settings: dict, fields=("api_key",), shared_fields=("zai_api_key",)) -> dict:
     """就地加密配置里的密钥字段，返回同一个 dict。
 
     两处都要处理：每个角色各自的 api_key，以及顶层的共享智谱 Key。
     只加密前者的话，共享 Key 会明文躺在 team_settings.json 里 —— 那正是要避免的事。
     """
-    for cfg in (settings.get("roles") or {}).values():
-        if not isinstance(cfg, dict):
-            continue
+    for cfg in _iter_role_dicts(settings):
         for field in fields:
             if cfg.get(field):
                 cfg[field] = encrypt_value(cfg[field])
@@ -141,9 +149,7 @@ def encrypt_settings(settings: dict, fields=("api_key",), shared_fields=("zai_ap
 
 
 def decrypt_settings(settings: dict, fields=("api_key",), shared_fields=("zai_api_key",)) -> dict:
-    for cfg in (settings.get("roles") or {}).values():
-        if not isinstance(cfg, dict):
-            continue
+    for cfg in _iter_role_dicts(settings):
         for field in fields:
             if cfg.get(field):
                 cfg[field] = decrypt_value(cfg[field])

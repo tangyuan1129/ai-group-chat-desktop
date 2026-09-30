@@ -30,8 +30,15 @@ def check(name, ok, detail=""):
     print(("  [OK]   " if ok else "  [FAIL] ") + name + (("  -> " + detail) if detail and not ok else ""))
 
 
-SETTINGS = {"max_messages": 18,
-            "roles": {"manager": {"display": "经理"}, "planner": {"display": "策划"}}}
+SETTINGS = {
+    "max_messages": 18,
+    "roles": [
+        {"id": "manager", "name": "经理", "color": "#2D7DFF", "enabled": True,
+         "source": "zhipu", "model": "glm-4.7-flash", "tools": []},
+        {"id": "planner", "name": "策划", "color": "#FF7A2D", "enabled": True,
+         "source": "zhipu", "model": "glm-4.7-flash", "tools": []},
+    ],
+}
 
 
 def pump(seconds, until=None):

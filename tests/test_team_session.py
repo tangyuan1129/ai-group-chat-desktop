@@ -37,10 +37,13 @@ def check(name, ok, detail=""):
 
 SETTINGS = {
     "max_messages": 18,
-    "roles": {
-        "manager": {"display": "经理", "color": "#2D7DFF"},
-        "planner": {"display": "策划", "color": "#FF7A2D"},
-    },
+    # 角色是有序列表：发言顺序就是列表顺序
+    "roles": [
+        {"id": "manager", "name": "经理", "color": "#2D7DFF", "enabled": True,
+         "source": "zhipu", "model": "glm-4.7-flash", "tools": []},
+        {"id": "planner", "name": "策划", "color": "#FF7A2D", "enabled": True,
+         "source": "zhipu", "model": "glm-4.7-flash", "tools": []},
+    ],
 }
 
 

@@ -1,28 +1,35 @@
 # -*- coding: utf-8 -*-
-"""配置与路径：读写、校验、损坏恢复、老版本数据迁移。
+"""配置与路径：角色列表、读写、校验、损坏恢复、老版本迁移。
 
-这里修掉旧版的三个产品级缺陷
-----------------------------
-1. **写配置不是原子的**。旧版直接 ``open(..., "w")`` 覆写 team_settings.json，
-   崩在写一半就得到一个半截 JSON；下次启动 json.load 失败 → 静默回默认值，
-   用户配置无声消失。这里改成"写临时文件 + 原子替换"，并且损坏时**备份 + 明确
-   告诉用户**，绝不静默吞掉。
-2. **配置和产出都塞在程序目录**。装到 D:\\ 根目录需要管理员权限，普通用户写不
-   进去就整个功能失效。现在用户数据放 %APPDATA%，AI 产出的文件放"文档"目录，
-   用户找得到、也不依赖安装位置。
-3. **密钥明文落盘**。见 secret_store.py，这里负责接上。
+角色模型（v3）
+--------------
+旧版把四个角色写死在代码里（manager / planner / engineer / reviewer），
+用户只能改改参数，不能增删。现在 roles 是一个**有序列表**：想加几个 AI 就加几个，
+每个角色独立配置名称、颜色、模型来源、模型、凭据、人设、以及能用的工具。
+发言顺序就是列表顺序。
+
+这样才谈得上"像 agent 一样可自定义"，而不是一个只能调参的固定班子。
+
+配置健壮性
+----------
+1. 写配置用"临时文件 + 原子替换"。旧版直接覆写，崩在写一半就得到半截 JSON，
+   下次启动解析失败后静默回默认值，用户配置无声消失。
+2. 损坏时备份 + 明确告知，绝不静默吞掉。
+3. 用户数据放 %APPDATA%，AI 产出放"文档"目录 —— 装到 D:\\ 根目录需要管理员
+   权限，普通用户写不进去。
 """
 import datetime
 import json
 import os
+import re
 import shutil
 import tempfile
 
 from secret_store import decrypt_settings, encrypt_settings
 
 APP_NAME = "AI团队群聊"
+CONFIG_VERSION = 3
 
-# 打包成 exe 后 __file__ 指向解包临时目录，所以只在开发态用它定位老数据
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -32,7 +39,6 @@ def _env_dir(name: str) -> str:
 
 
 def config_dir() -> str:
-    """配置、历史、日志：%APPDATA%\\AI团队群聊（不需要管理员权限）。"""
     base = os.environ.get("AIGC_CONFIG_DIR")
     if base:
         return base
@@ -78,59 +84,128 @@ def legacy_output_dir() -> str:
 
 
 def env_file() -> str:
-    """开发/高级用户仍可用 .env 提供 Key（优先级低于加密存储）。"""
     return os.environ.get("AIGC_ENV_FILE") or os.path.join(_THIS_DIR, ".env")
 
 
 def ensure_dirs() -> None:
-    for d in (config_dir(), history_dir(), logs_dir(), documents_dir()):
+    for folder in (config_dir(), history_dir(), logs_dir(), documents_dir()):
         try:
-            os.makedirs(d, exist_ok=True)
+            os.makedirs(folder, exist_ok=True)
         except Exception:
             pass
 
 
-# ── 默认配置 ───────────────────────────────────────────────────
-# 顺序即发言顺序：经理主持 → 策划提方案 → 工程师评估 → 评审把关
-DEFAULT_ROLES = [
-    ("manager",   "经理",   "#2D7DFF", "zhipu",  "glm-4.7-flash",
-     "你是项目经理，主持讨论：先拆解问题；出现分歧时裁决；最后把方案整理成明确分工。"
-     "所有发言必须用中文，简洁有观点，每次发言不超过150字，直接说内容，不要寒暄。"),
-    ("planner",   "策划",   "#FF7A2D", "ollama", "qwen2.5:7b",
-     "你是创意策划：负责提点子和方案设计，敢于反驳别人，但认可已被说服的观点。"
-     "所有发言必须用中文，简洁有观点，每次发言不超过150字，直接说内容，不要寒暄。"),
-    ("engineer",  "工程师", "#2EA84B", "zhipu",  "glm-4.7-flash",
-     "你是技术专家：负责评估可行性、指出风险、给落地建议。"
-     "所有发言必须用中文，简洁有观点，每次发言不超过150字，直接说内容，不要寒暄。"),
-    ("reviewer",  "评审",   "#9B59D0", "ollama", "qwen2.5:7b",
-     "你是评审官：负责挑漏洞把关。当经理给出明确分工且方案合理时，简短总结并在最后一行单独输出：APPROVE。"
-     "所有发言必须用中文，简洁有观点，每次发言不超过150字，直接说内容，不要寒暄。"),
+# ── 工具目录 ───────────────────────────────────────────────────
+# 每个角色能挂哪些"手臂"。界面上做成可勾选项。
+TOOL_CATALOG = [
+    ("web_search", "联网搜索", "搜索互联网，查实时信息、价格、攻略、新闻"),
+    ("read_text_file", "读取文件", "读取工作目录下的文本文件"),
+    ("write_text_file", "写入文件", "把内容写成文件保存到工作目录"),
+    ("list_files", "列出文件", "列出工作目录下的文件"),
+    ("github_api", "GitHub API", "查仓库、搜代码、看 Issues / PR"),
+    ("run_powershell", "只读命令", "执行查询类系统命令（进程、网络、硬件）"),
 ]
-
-ROLE_ORDER = tuple(r[0] for r in DEFAULT_ROLES)
+TOOL_NAMES = tuple(name for name, _label, _desc in TOOL_CATALOG)
+TOOL_LABELS = {name: label for name, label, _desc in TOOL_CATALOG}
 
 SOURCE_LABELS = {"zhipu": "云端智谱 GLM", "ollama": "本地 Ollama", "custom": "自定义 API"}
 SOURCE_SHORT = {"zhipu": "云端GLM", "ollama": "本地Ollama", "custom": "自定义API"}
 
 DEFAULT_MAX_ROUNDS = 18
 
+_COMMON_RULES = "所有发言必须用中文，简洁有观点，每次发言不超过150字，直接说内容，不要寒暄。"
+
+# ── 角色预设 ───────────────────────────────────────────────────
+# "添加角色"时可以直接选一个预设，也可以从空白开始。仿照 DSH 的 agent 预设思路：
+# 给个合理的起点，但不限制你改。
+ROLE_PRESETS = [
+    {
+        "key": "manager", "name": "经理", "color": "#5B8CFF",
+        "prompt": "你是项目经理，主持讨论：先拆解问题；出现分歧时裁决；最后把方案整理成明确分工。" + _COMMON_RULES,
+        "tools": ["web_search", "list_files", "read_text_file"],
+    },
+    {
+        "key": "planner", "name": "策划", "color": "#FF9F45",
+        "prompt": "你是创意策划：负责提点子和方案设计，敢于反驳别人，但认可已被说服的观点。" + _COMMON_RULES,
+        "tools": ["web_search", "list_files", "read_text_file"],
+    },
+    {
+        "key": "engineer", "name": "工程师", "color": "#3DD68C",
+        "prompt": "你是技术专家：负责评估可行性、指出风险、给落地建议。" + _COMMON_RULES,
+        "tools": ["web_search", "read_text_file", "write_text_file", "list_files",
+                  "github_api", "run_powershell"],
+    },
+    {
+        "key": "reviewer", "name": "评审", "color": "#C084FC",
+        "prompt": "你是评审官：负责挑漏洞把关。当方案合理时，简短总结并在最后一行单独输出：APPROVE。" + _COMMON_RULES,
+        "tools": ["web_search", "list_files", "read_text_file", "write_text_file"],
+    },
+    {
+        "key": "researcher", "name": "研究员", "color": "#38BDF8",
+        "prompt": "你是资料研究员：负责查证事实、找数据、给出信息来源，不确定就明说不确定。" + _COMMON_RULES,
+        "tools": ["web_search", "read_text_file", "list_files", "github_api"],
+    },
+    {
+        "key": "critic", "name": "唱反调", "color": "#F87171",
+        "prompt": "你是魔鬼代言人：专门找方案里最可能翻车的地方，指出被忽略的风险和代价，不要附和。" + _COMMON_RULES,
+        "tools": ["web_search", "read_text_file", "list_files"],
+    },
+    {
+        "key": "writer", "name": "执笔", "color": "#FBBF24",
+        "prompt": "你是文档执笔：把讨论结论整理成条理清晰的成稿，并写入文件保存。" + _COMMON_RULES,
+        "tools": ["read_text_file", "write_text_file", "list_files"],
+    },
+]
+PRESETS_BY_KEY = {p["key"]: p for p in ROLE_PRESETS}
+
+# 默认班子：混合模型（云端 + 本地），这样"异构"这个卖点开箱就能看到
+DEFAULT_ROLE_KEYS = ["manager", "planner", "engineer", "reviewer"]
+DEFAULT_SOURCES = {"manager": "zhipu", "planner": "ollama", "engineer": "zhipu",
+                   "reviewer": "ollama"}
+DEFAULT_MODELS = {"zhipu": "glm-4.7-flash", "ollama": "qwen2.5:7b", "custom": ""}
+
+
+def _slug(text: str, fallback: str) -> str:
+    """把中文名转成可用的英文 id（AutoGen 的 agent 名要求是简单标识符）。"""
+    ascii_only = re.sub(r"[^a-zA-Z0-9_]", "", text or "")
+    return ascii_only.lower() or fallback
+
+
+def make_role(key: str = "manager", index: int = 0) -> dict:
+    """按预设造一个角色。key 不存在时给一个空白角色。"""
+    preset = PRESETS_BY_KEY.get(key)
+    if preset is None:
+        return {
+            "id": "role%d" % (index + 1), "name": "角色%d" % (index + 1),
+            "color": "#5B8CFF", "enabled": True,
+            "source": "zhipu", "model": DEFAULT_MODELS["zhipu"],
+            "base_url": "", "api_key": "",
+            "system_prompt": "你是一个参与者，就讨论的问题给出你的观点。" + _COMMON_RULES,
+            "tools": ["web_search", "read_text_file", "list_files"],
+        }
+    source = DEFAULT_SOURCES.get(key, "zhipu")
+    return {
+        "id": _slug(key, "role%d" % (index + 1)),
+        "name": preset["name"],
+        "color": preset["color"],
+        "enabled": True,
+        "source": source,
+        "model": DEFAULT_MODELS.get(source, ""),
+        "base_url": "",
+        "api_key": "",
+        "system_prompt": preset["prompt"],
+        "tools": list(preset["tools"]),
+    }
+
 
 def default_settings() -> dict:
     return {
-        "version": 2,
+        "version": CONFIG_VERSION,
         "max_messages": DEFAULT_MAX_ROUNDS,
-        # 共享凭据：四个角色都用智谱时不必填四遍。必须出现在默认配置里，
-        # 否则 _merge_defaults 会把它整段丢掉（引导向导存的 Key 下次启动就没了）。
+        # 共享凭据：多个角色都用智谱时不必填多遍。必须出现在默认配置里，
+        # 否则合并时会被整段丢掉（存进去的 Key 下次启动就没了）。
         "shared": {"zai_api_key": "", "zai_base_url": ""},
-        "roles": {
-            name: {
-                "display": cn, "color": color,
-                "source": src, "model": model,
-                "base_url": "", "api_key": "",
-                "system_prompt": prompt,
-            }
-            for name, cn, color, src, model, prompt in DEFAULT_ROLES
-        },
+        "roles": [make_role(key, i) for i, key in enumerate(DEFAULT_ROLE_KEYS)],
     }
 
 
@@ -144,17 +219,59 @@ class LoadResult:
         self.recovered = kw.get("recovered", False)      # 配置损坏已备份
         self.backup_path = kw.get("backup_path", "")
         self.migrated = kw.get("migrated", False)
-        self.notes = kw.get("notes", [])                 # 给用户看的说明
-        self.problems = kw.get("problems", [])           # 校验发现的问题
+        self.notes = kw.get("notes", [])
+        self.problems = kw.get("problems", [])
 
     @property
-    def needs_onboarding(self) -> bool:
-        """是否该弹首次引导。"""
+    def needs_setup(self) -> bool:
+        """是否还没配好（界面用一条可关闭的提示条告知，而不是弹教程向导）。"""
         return self.created or bool(self.problems)
 
 
+def _normalize_role(raw: dict, index: int) -> dict:
+    """把一条角色记录补齐成完整结构，容忍老配置里缺字段。"""
+    base = make_role("__blank__", index)
+    if not isinstance(raw, dict):
+        return base
+    role = dict(base)
+    for field in ("id", "name", "color", "source", "model", "base_url",
+                  "api_key", "system_prompt"):
+        value = raw.get(field)
+        if isinstance(value, str) and value.strip():
+            role[field] = value.strip() if field != "system_prompt" else value
+    if isinstance(raw.get("enabled"), bool):
+        role["enabled"] = raw["enabled"]
+    tools = raw.get("tools")
+    if isinstance(tools, list):
+        role["tools"] = [t for t in tools if t in TOOL_NAMES]
+    if not role["id"] or not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", role["id"]):
+        role["id"] = "role%d" % (index + 1)
+    return role
+
+
+def _migrate_roles(raw_roles) -> list:
+    """roles 从 v2 的字典（固定四角色）迁移成 v3 的列表。"""
+    if isinstance(raw_roles, list):
+        return [_normalize_role(r, i) for i, r in enumerate(raw_roles)]
+    if isinstance(raw_roles, dict):
+        order = [k for k in DEFAULT_ROLE_KEYS if k in raw_roles]
+        order += [k for k in raw_roles if k not in order]
+        roles = []
+        for i, key in enumerate(order):
+            cfg = dict(raw_roles.get(key) or {})
+            preset = PRESETS_BY_KEY.get(key, {})
+            cfg.setdefault("id", _slug(key, "role%d" % (i + 1)))
+            cfg.setdefault("name", cfg.get("display") or preset.get("name") or key)
+            cfg.setdefault("color", preset.get("color") or "#5B8CFF")
+            cfg.setdefault("enabled", True)
+            cfg.setdefault("tools", list(preset.get("tools") or []))
+            roles.append(cfg)
+        return [_normalize_role(r, i) for i, r in enumerate(roles)]
+    return default_settings()["roles"]
+
+
 def _merge_defaults(data: dict) -> dict:
-    """把用户配置合并到默认配置上，保证新增角色/字段有值。"""
+    """把用户配置合并到默认配置上，保证新增字段有值。"""
     base = default_settings()
     if not isinstance(data, dict):
         return base
@@ -167,11 +284,10 @@ def _merge_defaults(data: dict) -> dict:
         for key, value in shared.items():
             if isinstance(value, str):
                 base["shared"][key] = value
-    user_roles = data.get("roles")
-    if isinstance(user_roles, dict):
-        for name, cfg in user_roles.items():
-            if name in base["roles"] and isinstance(cfg, dict):
-                base["roles"][name].update(cfg)
+    if "roles" in data:
+        roles = _migrate_roles(data["roles"])
+        if roles:
+            base["roles"] = roles
     return base
 
 
@@ -184,7 +300,7 @@ def _atomic_write_json(path: str, data: dict) -> None:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)          # 同一分区上的原子替换
+        os.replace(tmp, path)
     except Exception:
         try:
             os.unlink(tmp)
@@ -246,15 +362,13 @@ def load_settings(migrate: bool = True) -> LoadResult:
             raise ValueError("配置根节点不是对象")
     except Exception as exc:
         backup = _backup_corrupt(path)
-        result = LoadResult(
-            default_settings(), recovered=True, backup_path=backup, notes=notes,
-            problems=["配置文件无法解析（%s），已恢复为默认配置" % exc],
-        )
+        result = LoadResult(default_settings(), recovered=True,
+                            backup_path=backup, notes=notes)
+        result.problems = ["配置文件无法解析（%s），已恢复为默认配置" % exc]
         result.problems.extend(validate_settings(result.settings))
         return result
 
-    settings = _merge_defaults(raw)
-    settings = decrypt_settings(settings)
+    settings = decrypt_settings(_merge_defaults(raw))
     result = LoadResult(settings, notes=notes)
     result.problems = validate_settings(settings)
     return result
@@ -263,24 +377,41 @@ def load_settings(migrate: bool = True) -> LoadResult:
 def save_settings(settings: dict) -> None:
     """保存配置。api_key 字段加密后再落盘。"""
     os.makedirs(config_dir(), exist_ok=True)
-    payload = json.loads(json.dumps(settings, ensure_ascii=False))   # 深拷贝，别改调用方的对象
-    payload["version"] = 2
+    payload = json.loads(json.dumps(settings, ensure_ascii=False))   # 深拷贝
+    payload["version"] = CONFIG_VERSION
     encrypt_settings(payload)
     _atomic_write_json(settings_path(), payload)
 
 
+# ── 角色操作 ───────────────────────────────────────────────────
+def enabled_roles(settings: dict) -> list:
+    """参与讨论的角色（按列表顺序）。全被禁用时退回全部，避免"一个都不剩"。"""
+    roles = [r for r in (settings.get("roles") or []) if r.get("enabled", True)]
+    return roles or list(settings.get("roles") or [])
+
+
+def unique_role_id(settings: dict, base: str = "role") -> str:
+    used = {r.get("id") for r in (settings.get("roles") or [])}
+    candidate = _slug(base, "role") or "role"
+    if candidate not in used:
+        return candidate
+    n = 2
+    while "%s%d" % (candidate, n) in used:
+        n += 1
+    return "%s%d" % (candidate, n)
+
+
 # ── 校验 ───────────────────────────────────────────────────────
-def validate_role(cfg: dict) -> list:
-    """校验单个角色，返回问题列表（空列表表示没问题）。"""
+def validate_role(role: dict) -> list:
     problems = []
-    source = (cfg or {}).get("source", "zhipu")
-    model = ((cfg or {}).get("model") or "").strip()
+    source = (role or {}).get("source", "zhipu")
+    model = ((role or {}).get("model") or "").strip()
     if source not in SOURCE_LABELS:
         return ["模型来源无效：%s" % source]
     if source == "custom":
-        if not ((cfg.get("base_url") or "").strip()):
+        if not ((role.get("base_url") or "").strip()):
             problems.append("没填 Base URL")
-        if not ((cfg.get("api_key") or "").strip()):
+        if not ((role.get("api_key") or "").strip()):
             problems.append("没填 API Key")
         if not model:
             problems.append("没填模型名")
@@ -290,16 +421,21 @@ def validate_role(cfg: dict) -> list:
 
 
 def validate_settings(settings: dict) -> list:
-    """返回所有需要用户处理的问题，带角色中文名。"""
+    """返回所有需要用户处理的问题，带角色名。"""
     problems = []
-    roles = settings.get("roles") or {}
-    for name in ROLE_ORDER:
-        cfg = roles.get(name) or {}
-        cn = cfg.get("display") or name
-        for p in validate_role(cfg):
-            problems.append("「%s」%s" % (cn, p))
-    # 智谱 Key：加密存储里没有就看 .env
-    if any((roles.get(n) or {}).get("source", "zhipu") == "zhipu" for n in ROLE_ORDER):
+    roles = settings.get("roles") or []
+    if not roles:
+        problems.append("一个角色都没有，至少添加一个")
+        return problems
+    if not [r for r in roles if r.get("enabled", True)]:
+        problems.append("所有角色都被停用了，至少启用一个")
+    for role in roles:
+        if not role.get("enabled", True):
+            continue
+        name = role.get("name") or role.get("id") or "?"
+        for p in validate_role(role):
+            problems.append("「%s」%s" % (name, p))
+    if any((r.get("source", "zhipu") == "zhipu") and r.get("enabled", True) for r in roles):
         if not zhipu_key(settings):
             problems.append("没有配置智谱 API Key（有角色在用云端 GLM）")
     return problems
@@ -345,33 +481,3 @@ def github_token() -> str:
         return (dotenv_values(env_file()).get("GITHUB_TOKEN") or "").strip()
     except Exception:
         return ""
-
-
-if __name__ == "__main__":
-    import tempfile
-    os.environ["AIGC_CONFIG_DIR"] = tempfile.mkdtemp(prefix="aigc_cfg_")
-    os.environ["AIGC_WORK_ROOT"] = tempfile.mkdtemp(prefix="aigc_out_")
-    print("配置目录:", config_dir())
-    print("产出目录:", documents_dir())
-
-    r = load_settings(migrate=False)
-    print("首次加载 → created=%s problems=%s" % (r.created, r.problems))
-
-    s = r.settings
-    s["roles"]["engineer"]["source"] = "custom"
-    s["roles"]["engineer"]["base_url"] = "https://api.deepseek.com/v1"
-    s["roles"]["engineer"]["api_key"] = "sk-secret"
-    s["roles"]["engineer"]["model"] = "deepseek-chat"
-    save_settings(s)
-    print("已保存，落盘内容里是否还有明文 Key:",
-          "sk-secret" in open(settings_path(), encoding="utf-8").read())
-
-    r2 = load_settings(migrate=False)
-    print("重新加载 Key 正确解密:", r2.settings["roles"]["engineer"]["api_key"] == "sk-secret")
-    print("校验问题:", r2.problems)
-
-    with open(settings_path(), "w", encoding="utf-8") as f:
-        f.write('{"roles": {"manager": ')          # 故意写坏
-    r3 = load_settings(migrate=False)
-    print("损坏恢复 → recovered=%s 备份=%s" % (r3.recovered, os.path.basename(r3.backup_path)))
-    print("损坏后仍是完整默认配置:", bool(r3.settings["roles"]["manager"]["system_prompt"]))

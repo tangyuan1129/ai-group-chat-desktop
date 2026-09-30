@@ -27,8 +27,8 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-from app_config import ROLE_ORDER, SOURCE_SHORT
-from app_logging import get_logger, register_secret
+from app_config import enabled_roles
+from app_logging import get_logger
 from llm import format_error, make_client
 
 log = get_logger("session")
@@ -54,7 +54,9 @@ def stop_reason_cn(reason: str) -> str:
 
 
 def build_team(settings, clients, external):
-    """按配置建队。clients 是出参列表：建到一半失败时调用方仍能拿到已建好的客户端。
+    """按配置里的角色列表建队。
+
+    clients 是出参列表：建到一半失败时调用方仍能拿到已建好的客户端并关掉它们。
 
     reflect_on_tool_use=True 是刻意的：否则 AI 调完工具后，界面上会出现一段原始的
     [FunctionCall]/[FunctionExecutionResult] 文本，而不是模型读懂结果后的自然语言回答。
@@ -65,29 +67,26 @@ def build_team(settings, clients, external):
     from autogen_agentchat.teams import RoundRobinGroupChat
     from tools import build_tools
 
-    ROLE_TOOLS = {
-        "manager":  ["web_search", "list_files", "read_text_file"],
-        "planner":  ["web_search", "list_files", "read_text_file"],
-        "engineer": ["web_search", "read_text_file", "write_text_file", "list_files",
-                     "github_api", "run_powershell"],
-        "reviewer": ["web_search", "list_files", "read_text_file", "write_text_file"],
-    }
+    roles = enabled_roles(settings)
+    if not roles:
+        raise RuntimeError("没有可用的角色，请在「配置」里至少启用一个。")
 
     tools = build_tools()
-    roles = settings.get("roles") or {}
     agents = []
-    for name in ROLE_ORDER:
-        cfg = roles.get(name) or {}
-        cn = cfg.get("display") or name
+    for role in roles:
+        name = role.get("name") or role.get("id") or "角色"
         try:
-            client, _ = make_client(cfg, settings)
+            client, _ = make_client(role, settings)
         except Exception as exc:
-            raise RuntimeError("角色「%s」的模型配置不可用：\n%s" % (cn, format_error(exc))) from exc
+            raise RuntimeError("角色「%s」的模型配置不可用：\n%s"
+                               % (name, format_error(exc))) from exc
         clients.append(client)
         agents.append(AssistantAgent(
-            name=name, model_client=client,
-            system_message=cfg.get("system_prompt", ""),
-            tools=[tools[t] for t in ROLE_TOOLS.get(name, []) if t in tools],
+            # AutoGen 的 agent 名必须是简单标识符，所以用 id 而不是中文名
+            name=role.get("id") or "role",
+            model_client=client,
+            system_message=role.get("system_prompt", ""),
+            tools=[tools[t] for t in (role.get("tools") or []) if t in tools],
             model_client_stream=True,      # 流式：逐字显示，用户不用盯着空屏等
             reflect_on_tool_use=True,      # 让模型读懂工具结果再回答
         ))
@@ -105,7 +104,7 @@ def build_team(settings, clients, external):
 
 class TeamSession(QThread):
     # ── 消息 ──
-    message = Signal(str, str, str)        # 中文角色名, 内部名, 内容
+    message = Signal(str, str, str)        # 中文角色名, 角色 id, 内容
     stream_start = Signal(str, str)        # 中文角色名, 颜色
     stream_chunk = Signal(str)             # 文本片段
     stream_end = Signal(str)               # 该条发言的最终文本
@@ -115,7 +114,7 @@ class TeamSession(QThread):
     turn_stopped = Signal(bool)            # True = 强制停止，上下文已重置
     turn_error = Signal(str)
     # ── 会话 ──
-    session_ready = Signal()               # 首次成功建队（UI 可以提示"可以追问了"）
+    session_ready = Signal()               # 首次成功建队
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -135,6 +134,11 @@ class TeamSession(QThread):
         self._stream_buf = ""
         self._first_build_done = False
         self._closing = False
+        self._role_index = self._index_roles(settings)
+
+    @staticmethod
+    def _index_roles(settings) -> dict:
+        return {r.get("id"): r for r in (settings.get("roles") or []) if r.get("id")}
 
     # ── 主线程可调用的接口 ──────────────────────────────────────
     def ask(self, task: str) -> bool:
@@ -147,7 +151,7 @@ class TeamSession(QThread):
         """请求停止：先优雅，超时才强制。
 
         _external.set() 只是置一个 bool，跨线程安全，所以立刻做（让本轮尽快停）；
-        "本轮是否被用户停过" 这个标记则交给事件循环去设，避免主线程读到半截状态、
+        "本轮是否被用户停过"这个标记则交给事件循环去设，避免主线程读到半截状态、
         也避免上一轮的停止标记漏到下一轮去。
         """
         if self._external is not None:
@@ -158,6 +162,7 @@ class TeamSession(QThread):
     def apply_settings(self, settings):
         """配置变了。下一轮会重建团队 —— 上下文会丢，UI 需如实告知。"""
         self._settings = settings
+        self._role_index = self._index_roles(settings)
         self._needs_rebuild = True
 
     def new_conversation(self):
@@ -186,7 +191,7 @@ class TeamSession(QThread):
 
     @property
     def has_context(self) -> bool:
-        """当前是否带着上一轮的上下文（决定"新会话"按钮要不要亮）。"""
+        """当前是否带着上一轮的上下文。"""
         return (self._team is not None) and not self._needs_rebuild and not self._context_lost
 
     # ── 跨线程投递 ─────────────────────────────────────────────
@@ -317,10 +322,8 @@ class TeamSession(QThread):
         if self._team is not None and not self._needs_rebuild:
             return
         await self._close_team()
-        clients = []
-        external = None
         from autogen_agentchat.conditions import ExternalTermination
-        external = ExternalTermination()
+        clients, external = [], ExternalTermination()
         try:
             team = build_team(self._settings, clients, external)
         except Exception:
@@ -373,13 +376,14 @@ class TeamSession(QThread):
         log.info("本轮结束")
 
     # ── 事件分发 ───────────────────────────────────────────────
+    def _role(self, source: str) -> dict:
+        return self._role_index.get(source) or {}
+
     def _cn(self, source: str) -> str:
-        cfg = (self._settings.get("roles") or {}).get(source) or {}
-        return cfg.get("display") or source
+        return self._role(source).get("name") or source
 
     def _color(self, source: str) -> str:
-        cfg = (self._settings.get("roles") or {}).get(source) or {}
-        return cfg.get("color") or "#334155"
+        return self._role(source).get("color") or "#8FA3C8"
 
     def _close_stream(self, final_text=None):
         if self._stream_source is None:
