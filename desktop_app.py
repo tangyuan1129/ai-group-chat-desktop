@@ -1,21 +1,18 @@
 # -*- coding: utf-8 -*-
 """AI 团队群聊 · 桌面版 —— 主程序（界面与交互）。
 
-界面取向：ChatGPT 那种"少即是多"的布局
---------------------------------------
-· 左边一条窄侧栏：品牌 + 新对话 + 历史会话 + 设置
-· 右边一块内容区，正文居中限宽（约 760px），两侧留白
-· 我的发言是右对齐的圆角气泡，AI 的发言是左对齐的纯文本（带头像行）
-· 底部一个圆角输入框，发送键是白色圆钮
-· 整屏几乎不用彩色，颜色只留给"角色标记"
-
-不搞教程式向导：配置没配好时只在对话流里提示，点「去配置」进面板。
-角色是一个可自由增删改的列表，发言顺序就是列表顺序。
+界面取向：ChatGPT 桌面版
+------------------------
+· 左侧一条 76px 的窄图标栏（新对话 / 历史 / 团队 / 设置），不是宽文本侧栏
+· 整屏近纯黑，层次靠"比背景略亮的面板"分
+· 空状态只有一个大标题 + 一大块圆角输入框，输入框下方还有一排小工具
+· 输入框宽度上限 1100px，是画面里最大的实体
 
 模块
 ----
     desktop_app.py   界面与交互（本文件）
-    theme.py         ChatGPT 风格配色与样式表
+    icons.py         用 QPainter 画的线性图标
+    theme.py         ChatGPT 桌面版风格配色与样式表
     team_session.py  会话：多轮追问 / 流式输出 / 优雅停止
     llm.py           模型客户端构造与连接测试
     app_config.py    配置、角色列表、校验、损坏恢复
@@ -29,7 +26,7 @@ import os
 import sys
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QDialog, QDialogButtonBox, QFormLayout, QFrame, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -38,6 +35,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QSpinBox, QVBoxLayout, QWidget)
 
 import app_config
+import icons
 import theme
 from app_config import (PRESETS_BY_KEY, ROLE_PRESETS, SOURCE_LABELS, SOURCE_SHORT,
                         TOOL_CATALOG, LoadResult, load_settings, save_settings)
@@ -49,8 +47,15 @@ from team_session import TeamSession
 log = get_logger("ui")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+BODY_FONT_PT = 10.5
+BUBBLE_TEXT_MAX = int(theme.CHAT_MAX_WIDTH * 0.72) - 32
+EMPTY_HINTS = [
+    "推荐大学生宿舍百元内提升幸福感的小东西",
+    "设计一个五一成都 3 天旅行方案，4 人人均预算 2500",
+]
 
-# ── 小工具 ─────────────────────────────────────────────────────
+
+# ── 通用小工具 ─────────────────────────────────────────────────
 def open_in_explorer(path: str):
     try:
         if sys.platform == "win32":
@@ -81,27 +86,16 @@ def button(text, role="", on_click=None) -> QPushButton:
     return widget
 
 
-def dot_pixmap(color: str, size: int = 9) -> QPixmap:
-    """画一个实心小圆点，用来做角色标记。"""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setBrush(QColor(color))
-    painter.setPen(Qt.NoPen)
-    painter.drawEllipse(0, 0, size, size)
-    painter.end()
-    return pixmap
-
-
-def role_color(role: dict) -> str:
-    return (role or {}).get("color") or theme.ROLE_COLORS[0]
-
-
-# 正文用显式字体：QSS 的 font-size 要等 polish 才生效，构造时量不准宽度，
-# 而气泡宽度正是靠字体度量算出来的，两边必须一致。
-BODY_FONT_PT = 11
-BUBBLE_TEXT_MAX = int(theme.CONTENT_MAX_WIDTH * 0.75) - 32
+def icon_button(pixmap, tooltip, on_click=None, checkable=False) -> QPushButton:
+    widget = QPushButton()
+    widget.setObjectName("RailButton")
+    widget.setIcon(QIcon(pixmap))
+    widget.setIconSize(pixmap.size())
+    widget.setToolTip(tooltip)
+    widget.setCheckable(checkable)
+    if on_click:
+        widget.clicked.connect(on_click)
+    return widget
 
 
 def body_font() -> QFont:
@@ -109,11 +103,19 @@ def body_font() -> QFont:
 
 
 def measure_text(text: str, limit: int = None) -> int:
-    """量一段文字的单行宽度（可夹上限）。"""
+    """量一段文字的单行宽度（可夹上限）。
+
+    开了 wordWrap 的 QLabel 会给出偏小的 sizeHint，气泡会被挤窄、文字过早折行，
+    所以宽度得自己量。
+    """
     width = QFontMetrics(body_font()).horizontalAdvance(text or "")
     if limit is not None:
         width = min(width, limit)
     return max(24, width)
+
+
+def role_color(role: dict) -> str:
+    return (role or {}).get("color") or theme.ROLE_COLORS[0]
 
 
 # ── 消息控件 ───────────────────────────────────────────────────
@@ -127,13 +129,11 @@ class UserMessage(QWidget):
         row.addStretch(1)
         bubble = QFrame()
         bubble.setObjectName("UserBubble")
-        bubble.setMaximumWidth(int(theme.CONTENT_MAX_WIDTH * 0.75))
+        bubble.setMaximumWidth(int(theme.CHAT_MAX_WIDTH * 0.72))
         inner = QVBoxLayout(bubble)
         inner.setContentsMargins(16, 10, 16, 10)
         body = label(text, "body", wrap=True, selectable=True)
         body.setFont(body_font())
-        # 按内容定宽：否则 wordWrap 的 QLabel 会给出偏小的 sizeHint，
-        # 气泡被挤窄、文字过早折行。超过上限才交给 wordWrap 折。
         body.setFixedWidth(measure_text(text, BUBBLE_TEXT_MAX))
         inner.addWidget(body)
         row.addWidget(bubble)
@@ -142,7 +142,7 @@ class UserMessage(QWidget):
 class AssistantMessage(QWidget):
     """AI 的发言：左对齐，头一行是角色名（带色点），下面是正文。
 
-    流式输出就靠 append() 往正文里追加，所以正文是一个独立的 QLabel。
+    流式输出靠 append() 往正文里追加，所以正文是独立的 QLabel。
     """
 
     def __init__(self, name: str, color: str, parent=None):
@@ -155,8 +155,8 @@ class AssistantMessage(QWidget):
         head = QHBoxLayout()
         head.setSpacing(7)
         mark = QLabel()
-        mark.setPixmap(dot_pixmap(color))
-        mark.setFixedSize(9, 9)
+        mark.setPixmap(icons.dots(color, 12))
+        mark.setFixedSize(12, 12)
         head.addWidget(mark)
         name_label = label(name, "role-name")
         name_label.setStyleSheet("color: %s;" % color)
@@ -183,14 +183,11 @@ class AssistantMessage(QWidget):
 
 
 class ToolMessage(QWidget):
-    """工具调用过程：一行小字，不抢注意力。"""
-
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 1, 0, 1)
         line = label(text, "faint", wrap=True)
-        line.setStyleSheet("color: %s; font-size: 9pt;" % theme.TOOL_TEXT)
         layout.addWidget(line)
         layout.addStretch(1)
 
@@ -201,32 +198,27 @@ class SystemMessage(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 6, 0, 6)
         line = label(text, "faint", wrap=True)
-        line.setStyleSheet("color: %s; font-size: 9.5pt;" % theme.SYS_TEXT)
         layout.addWidget(line)
         layout.addStretch(1)
 
 
 class NoticeMessage(QWidget):
-    """带一个动作按钮的提示（例如"配置不完整 → 去配置"）。
-
-    width 不为空时整体限宽，并按可用空间把文字折行 —— 否则开了 wordWrap 的
-    QLabel 会给出偏大的 sizeHint，把整条提示顶得比旁边的示例芯片还宽。
-    """
+    """带一个动作按钮的提示。width 不为空时整体限宽并按可用空间折行。"""
 
     def __init__(self, text: str, action_text: str, on_action,
                  width: int = None, parent=None):
         super().__init__(parent)
         frame = QFrame()
         frame.setStyleSheet(
-            "QFrame { background: %s; border: 1px solid %s; border-radius: 12px; }"
+            "QFrame { background: %s; border: 1px solid %s; border-radius: 14px; }"
             % (theme.SURFACE, theme.BORDER))
         inner = QHBoxLayout(frame)
-        inner.setContentsMargins(14, 10, 10, 10)
+        inner.setContentsMargins(16, 12, 12, 12)
         inner.setSpacing(10)
         body = label(text, "dim", wrap=True)
         if width:
             self.setFixedWidth(width)
-            body.setFixedWidth(max(120, width - 150))   # 给按钮和留白让出空间
+            body.setFixedWidth(max(120, width - 170))
         inner.addWidget(body, stretch=1)
         inner.addWidget(button(action_text, "primary", on_action))
         outer = QVBoxLayout(self)
@@ -237,9 +229,8 @@ class NoticeMessage(QWidget):
 class CenteredPane(QWidget):
     """让内部控件水平居中并限宽。
 
-    注意：不能用 addStretch 来居中 —— QHBoxLayout 会把可用宽度按 stretch
-    因子平分，几个 stretch=1 就会把内容挤成 1/3 宽（setMaximumWidth 只是上限，
-    不是目标宽度）。所以这里在 resize 时按可用宽度算实际宽度。
+    注意：不能用 addStretch 居中 —— QHBoxLayout 会把可用宽度按 stretch 因子
+    平分，几个 stretch=1 就会把内容挤成 1/3 宽。所以这里在 resize 时算实际宽度。
     """
 
     def __init__(self, inner: QWidget, max_width: int = None,
@@ -286,15 +277,12 @@ class MessageArea(QScrollArea):
         outer.addStretch(1)
 
         self.setWidget(container)
-        self._empty_state = None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 内容列宽度按可用宽度算，别让弹簧把消息挤窄
         available = max(280, self.viewport().width() - 48)
-        self.column.setFixedWidth(min(theme.CONTENT_MAX_WIDTH, available))
+        self.column.setFixedWidth(min(theme.CHAT_MAX_WIDTH, available))
 
-    # ── 内容 ──
     def _insert(self, widget: QWidget):
         sticky = self.at_bottom()
         self.messages.insertWidget(self.messages.count() - 1, widget)
@@ -317,42 +305,7 @@ class MessageArea(QScrollArea):
     def add_system(self, text: str):
         return self._insert(SystemMessage(text))
 
-    def add_notice(self, text: str, action_text: str, on_action):
-        return self._insert(NoticeMessage(text, action_text, on_action))
-
-    def show_empty_state(self, title: str, hints: list, on_hint=None):
-        """空状态：一句招呼 + 几个可点的示例（像 ChatGPT 那样）。"""
-        self.clear()
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 60, 0, 20)
-        layout.setSpacing(18)
-        heading = label(title, "empty")
-        heading.setAlignment(Qt.AlignCenter)
-        layout.addWidget(heading)
-
-        chips = QWidget()
-        chip_layout = QVBoxLayout(chips)
-        chip_layout.setSpacing(8)
-        for hint in hints:
-            chip = button(hint, on_click=(lambda _=False, h=hint: on_hint and on_hint(h)))
-            chip.setStyleSheet(
-                "QPushButton { background: transparent; color: %s; border: 1px solid %s;"
-                "border-radius: 12px; padding: 10px 14px; font-size: 10pt; text-align: left; }"
-                "QPushButton:hover { background: %s; color: %s; }"
-                % (theme.TEXT_DIM, theme.BORDER, theme.SURFACE_HOVER, theme.TEXT))
-            chip_layout.addWidget(chip)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        chips.setMaximumWidth(520)
-        row.addWidget(chips)
-        row.addStretch(1)
-        layout.addLayout(row)
-        self._insert(widget)
-        self._empty_state = widget
-
     def clear(self):
-        self._empty_state = None
         while self.messages.count() > 1:
             item = self.messages.takeAt(0)
             widget = item.widget()
@@ -368,9 +321,67 @@ class MessageArea(QScrollArea):
             self.verticalScrollBar().maximum()))
 
 
-# ── 输入区 ─────────────────────────────────────────────────────
+# ── 左侧图标栏 ─────────────────────────────────────────────────
+class IconRail(QWidget):
+    """76px 窄图标栏（仿 ChatGPT 桌面版）。
+
+    和主区同色，靠"选中项有个圆角亮块"来指示，不是靠色差。
+    """
+
+    new_chat = Signal()
+    open_history = Signal()
+    open_config = Signal()
+    open_output = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Rail")
+        # QWidget 的子类默认不绘制 QSS 背景，必须显式打开
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setFixedWidth(theme.RAIL_WIDTH)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(6)
+
+        self.home_btn = icon_button(icons.plus(theme.TEXT, 20), "新对话",
+                                    self.new_chat.emit, checkable=True)
+        self.home_btn.setChecked(True)
+        root.addWidget(self.home_btn, alignment=Qt.AlignHCenter)
+
+        root.addWidget(icon_button(icons.clock(theme.TEXT_DIM, 20), "历史记录",
+                                   self.open_history.emit), alignment=Qt.AlignHCenter)
+        root.addWidget(icon_button(icons.people(theme.TEXT_DIM, 20), "团队成员与配置",
+                                   self.open_config.emit), alignment=Qt.AlignHCenter)
+        root.addWidget(icon_button(icons.folder(theme.TEXT_DIM, 20), "打开 AI 产出文件夹",
+                                   self.open_output.emit), alignment=Qt.AlignHCenter)
+
+        self.more_btn = icon_button(icons.dots(theme.TEXT_DIM, 20), "更多")
+        menu = QMenu(self)
+        menu.addAction("导出诊断包（含日志，已脱敏）", self._emit_more)
+        menu.addAction("打开日志文件夹", self._emit_more)
+        self.more_btn.setMenu(menu)
+        root.addWidget(self.more_btn, alignment=Qt.AlignHCenter)
+
+        root.addStretch(1)
+
+        root.addWidget(icon_button(icons.sliders(theme.TEXT_DIM, 20), "设置",
+                                   self.open_config.emit), alignment=Qt.AlignHCenter)
+
+    def _emit_more(self):
+        self.open_output.emit()
+
+    def set_active(self, name: str):
+        self.home_btn.setChecked(name == "home")
+
+
+# ── 底部输入区 ─────────────────────────────────────────────────
 class Composer(QFrame):
-    """底部输入框：圆角、聚焦时描边变亮，右侧一个圆形发送钮。"""
+    """一大块圆角输入面板：上面一行输入，下面一行控制。
+
+    仿 ChatGPT 桌面版那个大输入框 —— 它是画面里最大的实体，
+    placeholder 在上、工具行在下，右侧一个白色圆形发送钮。
+    """
 
     submitted = Signal(str)
     stop_requested = Signal()
@@ -379,31 +390,49 @@ class Composer(QFrame):
         super().__init__(parent)
         self.setObjectName("Composer")
         self.setProperty("focused", "false")
+        self.running = False
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(18, 10, 10, 10)
-        row.setSpacing(10)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 16, 12)
+        root.setSpacing(10)
+
         self.input = QLineEdit()
         self.input.setPlaceholderText("给团队发个任务…")
         self.input.returnPressed.connect(self._submit)
-        row.addWidget(self.input, stretch=1)
+        root.addWidget(self.input)
 
-        self.send_btn = QPushButton("↑")
+        controls = QHBoxLayout()
+        controls.setSpacing(8)
+
+        self.new_btn = QPushButton()
+        self.new_btn.setIcon(QIcon(icons.plus(theme.TEXT_DIM, 18)))
+        self.new_btn.setIconSize(icons.plus(theme.TEXT_DIM, 18).size())
+        self.new_btn.setFixedSize(30, 30)
+        self.new_btn.setToolTip("新对话")
+        controls.addWidget(self.new_btn)
+
+        self.team_label = label("", "dim")
+        controls.addWidget(self.team_label)
+        controls.addStretch(1)
+
+        self.send_btn = QPushButton()
         self.send_btn.setObjectName("SendButton")
+        self.send_btn.setIcon(QIcon(icons.arrow_up(theme.ACCENT_TEXT, 18)))
+        self.send_btn.setIconSize(icons.arrow_up(theme.ACCENT_TEXT, 18).size())
         self.send_btn.setToolTip("发送")
         self.send_btn.clicked.connect(self._submit)
-        row.addWidget(self.send_btn)
+        controls.addWidget(self.send_btn)
 
-        self.stop_btn = QPushButton("■")
+        self.stop_btn = QPushButton()
         self.stop_btn.setObjectName("StopButton")
+        self.stop_btn.setIcon(QIcon(icons.square_stop(theme.ACCENT_TEXT, 16)))
+        self.stop_btn.setIconSize(icons.square_stop(theme.ACCENT_TEXT, 16).size())
         self.stop_btn.setToolTip("停止")
         self.stop_btn.clicked.connect(self.stop_requested.emit)
         self.stop_btn.hide()
-        row.addWidget(self.stop_btn)
+        controls.addWidget(self.stop_btn)
 
-        # 显式状态位：不要用控件可见性推断业务状态，
-        # 窗口还没 show 的时候子控件的 isVisible() 恒为 False。
-        self.running = False
+        root.addLayout(controls)
         self.input.installEventFilter(self)
 
     def eventFilter(self, obj, event):
@@ -433,117 +462,11 @@ class Composer(QFrame):
     def set_placeholder(self, text: str):
         self.input.setPlaceholderText(text)
 
+    def set_team_text(self, text: str):
+        self.team_label.setText(text)
+
     def clear(self):
         self.input.clear()
-
-
-# ── 侧栏 ───────────────────────────────────────────────────────
-class Sidebar(QWidget):
-    """左侧会话栏：品牌 / 新对话 / 历史 / 设置。"""
-
-    new_chat = Signal()
-    open_settings = Signal()
-    history_selected = Signal(str)      # 历史文件路径，空串表示回到当前对话
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("Sidebar")
-        # QWidget 的子类默认不绘制 QSS 背景，必须显式打开，
-        # 否则侧栏和主区会糊成同一个颜色，整屏失去层次。
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setFixedWidth(260)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(10, 12, 10, 12)
-        root.setSpacing(6)
-
-        brand = QHBoxLayout()
-        brand.setContentsMargins(6, 0, 0, 6)
-        brand.addWidget(label("AI 团队群聊", "brand"))
-        brand.addStretch(1)
-        root.addLayout(brand)
-
-        self.new_btn = button("＋   新对话", "ghost", self.new_chat.emit)
-        root.addWidget(self.new_btn)
-
-        # 团队成员：这个应用的核心就是"几个不同模型的 AI"，
-        # 团队构成必须一眼可见，不能藏在 tooltip 里。
-        root.addWidget(label("团队成员", "section"))
-        self.team_box = QWidget()
-        self.team_layout = QVBoxLayout(self.team_box)
-        self.team_layout.setContentsMargins(0, 0, 0, 6)
-        self.team_layout.setSpacing(0)
-        root.addWidget(self.team_box)
-
-        root.addWidget(label("历史会话", "section"))
-        self.history = QListWidget()
-        self.history.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.history.itemClicked.connect(self._on_history_clicked)
-        root.addWidget(self.history, stretch=1)
-
-        root.addWidget(button("⚙   配置", "ghost", self.open_settings.emit))
-
-    def reload_roles(self, settings):
-        """按当前配置刷新团队成员列表。"""
-        while self.team_layout.count():
-            item = self.team_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        for role in app_config.enabled_roles(settings):
-            row = QPushButton("%s    %s" % (
-                role.get("name") or "?",
-                SOURCE_SHORT.get(role.get("source", ""), "?")))
-            row.setProperty("role", "ghost")
-            row.setIcon(QIcon(dot_pixmap(role_color(role), 9)))
-            row.setStyleSheet("text-align: left; font-size: 9.5pt; padding: 5px 8px;")
-            row.setToolTip("%s\n模型：%s\n\n点一下打开配置" % (
-                (role.get("system_prompt") or "")[:180],
-                role.get("model") or "未选"))
-            row.clicked.connect(self.open_settings.emit)
-            self.team_layout.addWidget(row)
-
-    def _on_history_clicked(self, item):
-        self.history_selected.emit(item.data(Qt.UserRole) or "")
-
-    def reload_history(self, items: list):
-        """按 今天 / 昨天 / 更早 分组，像 ChatGPT 那样。"""
-        self.history.clear()
-        if not items:
-            # 没有历史时给一句说明，否则侧栏下半部分是一大块无解释的空白
-            hint = QListWidgetItem("   还没有历史记录")
-            hint.setFlags(Qt.NoItemFlags)
-            hint.setForeground(QColor(theme.TEXT_FAINT))
-            self.history.addItem(hint)
-            return
-        today = datetime.date.today()
-        groups = {"今天": [], "昨天": [], "更早": []}
-        for item in items:
-            try:
-                when = datetime.datetime.strptime(item["time"], "%Y-%m-%d %H:%M:%S").date()
-            except Exception:
-                groups["更早"].append(item)
-                continue
-            delta = (today - when).days
-            groups["今天" if delta <= 0 else "昨天" if delta == 1 else "更早"].append(item)
-
-        for name, group in groups.items():
-            if not group:
-                continue
-            head = QListWidgetItem(name)
-            head.setFlags(Qt.NoItemFlags)
-            head.setForeground(QColor(theme.TEXT_FAINT))
-            head.setData(Qt.UserRole, "")
-            self.history.addItem(head)
-            for item in group:
-                task = item["task"][:22] + ("…" if len(item["task"]) > 22 else "")
-                row = QListWidgetItem("   " + task)
-                row.setData(Qt.UserRole, item["file"])
-                row.setToolTip("%s\n%s" % (item["time"], item["task"]))
-                self.history.addItem(row)
-
-    def select_none(self):
-        self.history.setCurrentRow(-1)
 
 
 # ── 模型连通性测试 ─────────────────────────────────────────────
@@ -587,7 +510,7 @@ class RoleDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 20, 22, 18)
         root.setSpacing(12)
-        heading = label("添加角色" if self.is_new else "编辑角色")
+        heading = label("添加角色" if self.is_new else "编辑角色", "title")
         heading.setStyleSheet("font-size: 13pt; font-weight: 600;")
         root.addWidget(heading)
 
@@ -598,16 +521,17 @@ class RoleDialog(QDialog):
         form = QFormLayout(inner)
         form.setSpacing(11)
 
+        field_qss = ("background: %s; border: 1px solid %s; border-radius: 9px;"
+                     "padding: 8px 11px;" % (theme.SURFACE, theme.BORDER))
+
         self.name_edit = QLineEdit(self.role.get("name", ""))
-        self.name_edit.setStyleSheet(
-            "QLineEdit { background: %s; border: 1px solid %s; border-radius: 9px;"
-            "padding: 8px 11px; }" % (theme.SURFACE, theme.BORDER))
+        self.name_edit.setStyleSheet("QLineEdit { %s }" % field_qss)
         self.name_edit.setPlaceholderText("例如：经理 / 策划 / 唱反调")
         form.addRow("名称", self.name_edit)
 
         self.color_box = QComboBox()
         for value in theme.ROLE_COLORS:
-            self.color_box.addItem(dot_pixmap(value), value, value)
+            self.color_box.addItem(QIcon(icons.dots(value, 12)), value, value)
         index = self.color_box.findData(self.role.get("color"))
         self.color_box.setCurrentIndex(index if index >= 0 else 0)
         form.addRow("颜色", self.color_box)
@@ -625,19 +549,19 @@ class RoleDialog(QDialog):
         form.addRow("模型", self.model_box)
 
         self.base_edit = QLineEdit(self.role.get("base_url", ""))
+        self.base_edit.setStyleSheet("QLineEdit { %s }" % field_qss)
         self.base_edit.setPlaceholderText("例如 https://api.deepseek.com/v1")
         form.addRow("Base URL", self.base_edit)
 
         self.key_edit = QLineEdit(self.role.get("api_key", ""))
+        self.key_edit.setStyleSheet("QLineEdit { %s }" % field_qss)
         self.key_edit.setEchoMode(QLineEdit.Password)
         self.key_edit.setPlaceholderText("自定义来源才需要；会加密保存")
         form.addRow("API Key", self.key_edit)
 
         self.prompt_edit = QPlainTextEdit(self.role.get("system_prompt", ""))
         self.prompt_edit.setMinimumHeight(110)
-        self.prompt_edit.setStyleSheet(
-            "QPlainTextEdit { background: %s; border: 1px solid %s; border-radius: 9px;"
-            "padding: 8px 11px; }" % (theme.SURFACE, theme.BORDER))
+        self.prompt_edit.setStyleSheet("QPlainTextEdit { %s }" % field_qss)
         form.addRow("人设提示词", self.prompt_edit)
 
         tools_box = QWidget()
@@ -733,7 +657,7 @@ class PresetDialog(QDialog):
         for preset in ROLE_PRESETS:
             item = QListWidgetItem("%s    %s" % (preset["name"], preset["prompt"][:30] + "…"))
             item.setData(Qt.UserRole, preset["key"])
-            item.setIcon(QIcon(dot_pixmap(preset["color"], 10)))
+            item.setIcon(QIcon(icons.dots(preset["color"], 12)))
             self.list_widget.addItem(item)
         blank = QListWidgetItem("空白角色    自己写人设，从零开始")
         blank.setData(Qt.UserRole, "__blank__")
@@ -773,7 +697,9 @@ class ConfigDialog(QDialog):
         root.setSpacing(12)
 
         head = QHBoxLayout()
-        head.addWidget(label("配置", "empty"))
+        heading = label("配置", "title")
+        heading.setStyleSheet("font-size: 13pt; font-weight: 600;")
+        head.addWidget(heading)
         head.addStretch(1)
         self.test_btn = button("测试全部", on_click=self._on_test)
         head.addWidget(self.test_btn)
@@ -863,7 +789,7 @@ class ConfigDialog(QDialog):
             if not enabled:
                 text += "    （已停用）"
             item = QListWidgetItem(text)
-            item.setIcon(QIcon(dot_pixmap(role_color(role), 10)))
+            item.setIcon(QIcon(icons.dots(role_color(role), 12)))
             if not enabled:
                 item.setForeground(QColor(theme.TEXT_FAINT))
             self.role_list.addItem(item)
@@ -986,7 +912,7 @@ class ConfigDialog(QDialog):
         self.accept()
 
 
-# ── 历史记录读写 ───────────────────────────────────────────────
+# ── 历史记录 ───────────────────────────────────────────────────
 def list_history() -> list:
     folder = app_config.history_dir()
     if not os.path.isdir(folder):
@@ -1035,14 +961,57 @@ def save_history(entries, task, time_str, meta=None) -> str:
         return ""
 
 
+class HistoryPanel(QDialog):
+    """历史记录面板（图标栏那个时钟图标打开它）。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("历史记录")
+        self.setMinimumSize(560, 620)
+        self.items = []
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 16)
+        root.setSpacing(10)
+        heading = label("历史记录", "title")
+        heading.setStyleSheet("font-size: 13pt; font-weight: 600;")
+        root.addWidget(heading)
+        self.list_widget = QListWidget()
+        self.list_widget.itemClicked.connect(self._on_clicked)
+        root.addWidget(self.list_widget, stretch=1)
+        self.count_label = label("", "faint", wrap=True)
+        root.addWidget(self.count_label)
+        row = QHBoxLayout()
+        row.addWidget(button("打开记录文件夹", "tool", self._open_folder))
+        row.addStretch(1)
+        row.addWidget(button("关闭", on_click=self.reject))
+        root.addLayout(row)
+        self._load()
+
+    def _open_folder(self):
+        folder = app_config.history_dir()
+        os.makedirs(folder, exist_ok=True)
+        open_in_explorer(folder)
+
+    def _load(self):
+        self.items = list_history()
+        self.list_widget.clear()
+        for item in self.items:
+            task = item["task"][:30] + ("…" if len(item["task"]) > 30 else "")
+            row = QListWidgetItem("%s\n%s" % (item["time"], task))
+            row.setData(Qt.UserRole, item["file"])
+            self.list_widget.addItem(row)
+        self.count_label.setText("共 %d 条记录 · %s" % (len(self.items), app_config.history_dir()))
+
+    def _on_clicked(self, item):
+        path = item.data(Qt.UserRole)
+        if path:
+            self.selected_path = path
+            self.accept()
+
+    selected_path = ""
+
+
 # ── 主窗口 ─────────────────────────────────────────────────────
-EMPTY_HINTS = [
-    "推荐大学生宿舍百元内提升幸福感的小东西",
-    "设计一个五一成都 3 天旅行方案，4 人人均预算 2500",
-    "帮我评估一下这个想法值不值得做：……",
-]
-
-
 class MainWindow(QMainWindow):
     def __init__(self, load_result: LoadResult = None):
         super().__init__()
@@ -1051,8 +1020,8 @@ class MainWindow(QMainWindow):
         self.session = None
         self.cur_task = ""
         self.cur_messages = []
-        self._streaming = None          # 当前正在流式输出的 AssistantMessage
-        self._stream_name = ""           # 当前流式发言的角色名
+        self._streaming = None
+        self._stream_name = ""
         self._stream_color = theme.TEXT
         self._reading_history = False
 
@@ -1067,8 +1036,8 @@ class MainWindow(QMainWindow):
     def _apply_default_geometry(self):
         """按屏幕比例给一个像样的默认尺寸并居中。
 
-        不这么做的话，Qt 会直接用布局的 sizeHint —— 那个值恰好贴着
-        setMinimumSize，窗口开出来又小又挤在左上角。
+        不这么做的话 Qt 会直接用布局 sizeHint，那个值恰好贴着 setMinimumSize，
+        窗口开出来又小又挤在左上角。
         """
         screen = QApplication.primaryScreen()
         if screen is None:
@@ -1105,45 +1074,23 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self.sidebar = Sidebar()
-        self.sidebar.new_chat.connect(self.start_new_conversation)
-        self.sidebar.open_settings.connect(self.open_config)
-        self.sidebar.history_selected.connect(self.open_history_item)
-        root.addWidget(self.sidebar)
+        self.rail = IconRail()
+        self.rail.new_chat.connect(self.start_new_conversation)
+        self.rail.open_history.connect(self.open_history)
+        self.rail.open_config.connect(self.open_config)
+        self.rail.open_output.connect(lambda: open_in_explorer(app_config.documents_dir()))
+        root.addWidget(self.rail)
 
         content = QWidget()
         content.setObjectName("Content")
         column = QVBoxLayout(content)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
-
-        # 顶栏：极薄，只放团队概览和一个菜单
-        top = QWidget()
-        top.setFixedHeight(50)
-        top_row = QHBoxLayout(top)
-        top_row.setContentsMargins(24, 10, 16, 6)
-        top_row.setSpacing(10)
-        self.title_label = label("新对话", "role-name")
-        top_row.addWidget(self.title_label)
-        top_row.addStretch(1)
-        self.more_btn = button("⋯", "ghost")
-        self.more_btn.setFixedWidth(36)
-        menu = QMenu(self)
-        menu.addAction("配置角色与模型", self.open_config)
-        menu.addSeparator()
-        menu.addAction("导出诊断包（含日志，已脱敏）", self.export_diagnostics_action)
-        menu.addAction("打开日志文件夹", lambda: open_in_explorer(app_config.logs_dir()))
-        menu.addAction("打开 AI 产出文件夹", lambda: open_in_explorer(app_config.documents_dir()))
-        self.more_btn.setMenu(menu)
-        top_row.addWidget(self.more_btn)
-        column.addWidget(top)
-
-        # 布局骨架（顺序很关键）：
-        #   顶栏 / 上弹簧 / 空状态块 / 消息区 / 输入区 / 下弹簧
-        # 空状态时两个弹簧都撑开，把「标题+示例+输入框」顶到竖直居中；
-        # 开始对话后上弹簧收掉、消息区撑开，输入框自然落到底部。
         self.column = column
 
+        # 布局骨架：弹簧 / 空状态 / 消息区 / 输入区 / 弹簧
+        # 空状态时两个弹簧都撑开，把「大标题 + 输入框 + 工具行」顶到竖直居中；
+        # 开始对话后上弹簧收掉、消息区撑开，输入框自然落到底部。
         column.addStretch(1)
         self._i_stretch_top = column.count() - 1
 
@@ -1157,21 +1104,7 @@ class MainWindow(QMainWindow):
         column.addWidget(self.area, stretch=1)
         self._i_area = column.count() - 1
 
-        # 输入区：居中限宽，和正文对齐
-        wrap = QWidget()
-        wrap_column = QVBoxLayout(wrap)
-        wrap_column.setContentsMargins(0, 0, 0, 0)
-        wrap_column.setSpacing(6)
-        self.composer = Composer()
-        self.composer.submitted.connect(self.send_task)
-        self.composer.stop_requested.connect(self.stop)
-        wrap_column.addWidget(self.composer)
-        self.status = label("就绪", "faint")
-        self.status.setAlignment(Qt.AlignCenter)
-        wrap_column.addWidget(self.status)
-        bottom = CenteredPane(wrap, margin=24)
-        bottom.setContentsMargins(0, 6, 0, 14)
-        column.addWidget(bottom)
+        self._build_composer_area(column)
         self._i_bottom = column.count() - 1
 
         column.addStretch(1)
@@ -1180,15 +1113,49 @@ class MainWindow(QMainWindow):
         root.addWidget(content, stretch=1)
         self.setCentralWidget(central)
 
+    def _build_composer_area(self, column):
+        holder = QWidget()
+        holder_layout = QVBoxLayout(holder)
+        holder_layout.setContentsMargins(0, 6, 0, 14)
+        holder_layout.setSpacing(8)
+
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setContentsMargins(0, 0, 0, 0)
+        inner_layout.setSpacing(8)
+
+        self.composer = Composer()
+        self.composer.submitted.connect(self.send_task)
+        self.composer.stop_requested.connect(self.stop)
+        self.composer.new_btn.clicked.connect(self.start_new_conversation)
+        inner_layout.addWidget(self.composer)
+
+        # 输入框下方那排小工具（仿 ChatGPT 的 文件 / 插件 那一行）
+        tool_row = QFrame()
+        tool_row.setObjectName("ToolRow")
+        tools = QHBoxLayout(tool_row)
+        tools.setContentsMargins(14, 6, 14, 6)
+        tools.setSpacing(4)
+        tools.addWidget(button("AI 产出文件夹", "tool",
+                               lambda: open_in_explorer(app_config.documents_dir())))
+        tools.addWidget(button("历史记录", "tool", self.open_history))
+        tools.addWidget(button("配置角色", "tool", self.open_config))
+        tools.addStretch(1)
+        self.status = label("就绪", "faint")
+        tools.addWidget(self.status)
+        inner_layout.addWidget(tool_row)
+
+        pane = CenteredPane(inner, margin=24)
+        holder_layout.addWidget(pane)
+        column.addWidget(holder)
+
     def _refresh_team_label(self):
-        """刷新侧栏的团队成员列表。"""
-        self.sidebar.reload_roles(self.settings)
+        roles = app_config.enabled_roles(self.settings)
+        names = "、".join(r.get("name") or "?" for r in roles)
+        self.composer.set_team_text("%d 个角色 · %s" % (len(roles), names))
 
-    def _reload_sidebar(self):
-        self.sidebar.reload_history(list_history())
-
+    # ── 空状态 / 对话中 两种骨架 ──
     def _set_empty_layout(self, empty: bool):
-        """在「空状态」和「对话中」两种骨架之间切换。"""
         self.empty_block.setVisible(empty)
         self.area.setVisible(not empty)
         self.column.setStretch(self._i_stretch_top, 1 if empty else 0)
@@ -1203,62 +1170,37 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
 
     def _build_empty_state(self):
-        """空状态：一句招呼 + 几个可点的示例 + 缺配置时的提示条。
+        """空状态：一句大标题 + 缺配置时的提示条。
 
-        它和输入框一起竖直居中 —— 这样中间不会空出一大块。
+        输入框不在这里 —— 它在同一条竖直布局里紧跟其后，靠弹簧一起居中。
         """
         self._clear_layout(self.empty_layout)
 
-        heading = label("有什么可以帮你的？", "empty")
+        heading = label("我们要做什么？", "heading")
         heading.setAlignment(Qt.AlignCenter)
-        self.empty_layout.addSpacing(4)
         self.empty_layout.addWidget(heading)
-        self.empty_layout.addSpacing(22)
-
-        chips = QWidget()
-        chip_layout = QVBoxLayout(chips)
-        chip_layout.setContentsMargins(0, 0, 0, 0)
-        chip_layout.setSpacing(8)
-        for hint in EMPTY_HINTS:
-            chip = button(hint, on_click=lambda _=False, h=hint: self._use_hint(h))
-            chip.setStyleSheet(
-                "QPushButton { background: %s; color: %s; border: 1px solid %s;"
-                "border-radius: 14px; padding: 11px 16px; font-size: 10pt;"
-                "text-align: left; }"
-                "QPushButton:hover { background: %s; border-color: %s; color: %s; }"
-                % (theme.SURFACE, theme.TEXT_DIM, theme.BORDER,
-                   theme.SURFACE_ACTIVE, theme.BORDER_STRONG, theme.TEXT))
-            chip_layout.addWidget(chip)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addStretch(1)
-        chips.setFixedWidth(min(560, theme.CONTENT_MAX_WIDTH))
-        row.addWidget(chips)
-        row.addStretch(1)
-        self.empty_layout.addLayout(row)
+        self.empty_layout.addSpacing(26)
 
         problems = self.load_result.problems
         if problems:
-            self.empty_layout.addSpacing(20)
-            notice_row = QHBoxLayout()
-            notice_row.setContentsMargins(0, 0, 0, 0)
-            notice_row.addStretch(1)
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addStretch(1)
             notice = NoticeMessage(
                 "还差 %d 项就能开始了：%s" % (len(problems), "；".join(problems[:2])),
-                "去配置", self.open_config,
-                width=min(560, theme.CONTENT_MAX_WIDTH))
-            notice_row.addWidget(notice)
-            notice_row.addStretch(1)
-            self.empty_layout.addLayout(notice_row)
+                "去配置", self.open_config, width=min(620, theme.CONTENT_MAX_WIDTH))
+            row.addWidget(notice)
+            row.addStretch(1)
+            self.empty_layout.addLayout(row)
 
     def _start_fresh_view(self):
         self._refresh_team_label()
-        self._reload_sidebar()
         self.area.clear()
         self._build_empty_state()
         self._set_empty_layout(True)
+        self.rail.set_active("home")
         if self.load_result.recovered:
-            self.status.setText("上次的配置文件损坏了，已备份并恢复默认配置。")
+            self.status.setText("配置损坏，已恢复默认")
         elif self.load_result.notes:
             self.status.setText(self.load_result.notes[0])
         else:
@@ -1310,7 +1252,6 @@ class MainWindow(QMainWindow):
             self._set_empty_layout(False)
             self.cur_task = task
             self.cur_messages = [{"kind": "user", "name": "我", "content": task}]
-            self.title_label.setText(task[:26] + ("…" if len(task) > 26 else ""))
 
         self.composer.clear()
         self.composer.set_running(True)
@@ -1323,7 +1264,7 @@ class MainWindow(QMainWindow):
         if self.session is None or not self.composer.running:
             return
         self.composer.stop_btn.setEnabled(False)
-        self.status.setText("正在停止…（等当前发言收尾）")
+        self.status.setText("正在停止…")
         self.session.stop()
 
     def start_new_conversation(self):
@@ -1336,28 +1277,28 @@ class MainWindow(QMainWindow):
         self.composer.input.setEnabled(True)
         if self.session is not None:
             self.session.new_conversation()
-        self.title_label.setText("新对话")
-        self.sidebar.select_none()
         self._start_fresh_view()
 
     # ── 历史 ──
-    def open_history_item(self, path: str):
-        if not path:
-            return
-        data = load_history_file(path)
-        if not data:
-            return
+    def open_history(self):
         if self.composer.running:
             QMessageBox.information(self, "正在讨论中", "先停止当前讨论，再看历史。")
+            return
+        panel = HistoryPanel(self)
+        if panel.exec() == QDialog.Accepted and panel.selected_path:
+            self.open_history_item(panel.selected_path)
+
+    def open_history_item(self, path: str):
+        data = load_history_file(path)
+        if not data:
             return
         self._save_cur_history(ending="用户去看了历史记录")
         self._reading_history = True
         self.composer.set_running(False)
         self.composer.input.setEnabled(False)
-        self.title_label.setText(data.get("task", "历史记录")[:26])
         self.area.clear()
         self._set_empty_layout(False)
-        self.area.add_system("这是 %s 的历史记录（只读）。点侧栏「＋ 新对话」回到当前对话。"
+        self.area.add_system("这是 %s 的历史记录（只读）。点左侧「＋」回到新对话。"
                              % data.get("time", ""))
         self.area.add_user(data.get("task", ""))
         for msg in data.get("messages", []):
@@ -1372,6 +1313,7 @@ class MainWindow(QMainWindow):
                                                      msg.get("content", "")))
             elif kind == "system":
                 self.area.add_system(msg.get("content", ""))
+        self.status.setText("正在查看历史记录（只读）")
         self._update_placeholder()
 
     # ── 会话信号 ──
@@ -1395,14 +1337,12 @@ class MainWindow(QMainWindow):
             return
         self._streaming.set_text(final_text)
         if final_text.strip():
-            self.cur_messages.append({"kind": "msg",
-                                      "name": self._stream_name or "",
+            self.cur_messages.append({"kind": "msg", "name": self._stream_name or "",
                                       "content": final_text,
                                       "color": self._stream_color or theme.TEXT})
         self._streaming = None
 
     def _on_message(self, cn_name, source, content):
-        """没有走流式的完整发言（例如工具回合之后的自然语言总结）。"""
         self._streaming = None
         self.area.add_assistant(cn_name, self._role_color(source), content)
         self.cur_messages.append({"kind": "msg", "name": cn_name,
@@ -1418,7 +1358,6 @@ class MainWindow(QMainWindow):
         self.area.add_system("本轮结束。%s" % reason)
         self._save_cur_history(ending="讨论结束（%s）" % reason)
         self._reset_ui("可以继续追问")
-        self._reload_sidebar()
 
     def _on_turn_stopped(self, context_lost):
         self.area.add_system("已强制停止，上下文已重置 —— 下一次发言会开新对话。"
@@ -1426,7 +1365,6 @@ class MainWindow(QMainWindow):
                              "已停止，上下文保留，可以直接接着追问。")
         self._save_cur_history(ending="用户手动停止了讨论")
         self._reset_ui("已停止")
-        self._reload_sidebar()
 
     def _on_turn_error(self, message):
         self.area.add_system("出错：%s" % message)
@@ -1473,6 +1411,7 @@ class MainWindow(QMainWindow):
             self._refresh_team_label()
             if self.session is not None:
                 self.session.apply_settings(self.settings)
+            self._build_empty_state()
             self.area.add_system("配置已更新。下一次发言会按新配置重建团队，会话上下文重新开始。")
 
     def export_diagnostics_action(self):

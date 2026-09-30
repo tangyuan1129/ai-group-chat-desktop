@@ -108,8 +108,8 @@ win, holder = new_window()
 check("需要配置（needs_setup）", win.load_result.needs_setup)
 check("空状态里有缺配置提示", "还差" in empty_text(win), empty_text(win)[:200])
 check("提示里点明缺什么", "API Key" in empty_text(win), empty_text(win)[:200])
-check("有空状态引导", "有什么可以帮你的" in empty_text(win), empty_text(win)[:200])
-check("侧栏有历史分组或为空", win.sidebar.history.count() >= 0)
+check("有空状态引导", "我们要做什么" in empty_text(win), empty_text(win)[:200])
+check("图标栏在左侧", win.rail.width() <= 100, "宽度=%d" % win.rail.width())
 
 print()
 print("=" * 72)
@@ -135,8 +135,9 @@ check("会话带着上下文", win.session.has_context)
 check("输入框提示改成追问", "追问" in win.composer.input.placeholderText(),
       win.composer.input.placeholderText())
 check("历史已落盘", len(os.listdir(app_config.history_dir())) >= 1)
-check("侧栏出现了这条会话", win.sidebar.history.count() >= 2,
-      "侧栏条目数=%d" % win.sidebar.history.count())
+check("历史里能查到这条会话",
+      any("推荐大学生宿舍" in it["task"] for it in desktop_app.list_history()),
+      str([it["task"] for it in desktop_app.list_history()]))
 
 print()
 print("=" * 72)
@@ -180,8 +181,8 @@ print("E. 新对话：清空上下文")
 print("=" * 72)
 win.start_new_conversation()
 check("新对话后不再带上下文", not win.session.has_context)
-check("回到空状态", "有什么可以帮你的" in empty_text(win), empty_text(win)[:150])
-check("标题回到新对话", win.title_label.text() == "新对话", win.title_label.text())
+check("回到空状态", "我们要做什么" in empty_text(win), empty_text(win)[:150])
+check("回到空状态标题", "我们要做什么" in empty_text(win), empty_text(win)[:120])
 check("输入框提示改回任务", "追问" not in win.composer.input.placeholderText(),
       win.composer.input.placeholderText())
 
@@ -209,13 +210,12 @@ win, holder = new_window(per_turn=1)
 win.send_task("会被存进历史的任务")
 pump(8.0, until=lambda: win.composer.input.isEnabled())
 win.start_new_conversation()
-items = [win.sidebar.history.item(i) for i in range(win.sidebar.history.count())]
+items = desktop_app.list_history()
 # 按内容精确匹配：同一秒内可能存了多条，按时间排序会并列，取第一条不稳定
-target = next((it for it in items
-               if "会被存进历史的任务" in (it.toolTip() or "")), None)
-check("侧栏能列出历史条目", target is not None)
+target = next((it for it in items if "会被存进历史的任务" in it["task"]), None)
+check("历史里能列出条目", target is not None)
 if target is not None:
-    win.open_history_item(target.data(desktop_app.Qt.UserRole))
+    win.open_history_item(target["file"])
     check("历史以只读方式打开", win._reading_history)
     check("历史内容渲染出来", "会被存进历史的任务" in area_text(win), area_text(win)[:200])
     check("只读时输入框禁用", not win.composer.input.isEnabled())
