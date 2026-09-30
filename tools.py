@@ -56,13 +56,30 @@ WORK_ROOT = os.path.normpath(
 )
 
 def _safe_path(path: str) -> str:
-    """把相对路径限制在 WORK_ROOT 下，防止越权访问任意系统文件。"""
-    if not os.path.isabs(path):
-        path = os.path.join(WORK_ROOT, path)
-    path = os.path.normpath(path)
-    if not path.startswith(WORK_ROOT):
+    """把路径限制在 WORK_ROOT 下，防止越权访问任意系统文件。
+
+    旧版只做了一次 startswith 判断，有两个可绕过点，这里都堵上：
+      1) 前缀匹配漏洞：WORK_ROOT 是 ...\\output 时，...\\output_backup\\x.txt
+         也会被判成"合法"。改用 commonpath 按目录边界比较。
+      2) 符号链接/junction 逃逸：在 output 里放一个指向 C:\\ 的链接，
+         路径字符串仍然在 WORK_ROOT 下。用 realpath 解析后再比。
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("路径不能为空")
+    raw = path.strip().strip('"').strip("'")
+    if not os.path.isabs(raw):
+        raw = os.path.join(WORK_ROOT, raw)
+    full = os.path.normpath(raw)
+
+    real_root = os.path.realpath(WORK_ROOT)
+    real_full = os.path.realpath(full)
+    try:
+        common = os.path.commonpath([real_root, real_full])
+    except ValueError:
+        common = ""          # 不同盘符时 commonpath 会抛异常，直接判越界
+    if os.path.normcase(common) != os.path.normcase(real_root):
         raise ValueError(f"路径越界：{path}（限定在 {WORK_ROOT} 内）")
-    return path
+    return full
 
 
 def read_text_file(path: str) -> str:
@@ -203,6 +220,31 @@ DANGEROUS_PATTERNS = [
     r"\bStop-Process\b", r"\breg\s+delete\b", r"\bshutdown\b", r"\brmdir\b",
     r"\bClear-Content\b", r"\bSet-Content\b", r"\bAdd-Content\b", r"\bOut-File\b",
     r"\bMove-Item\b", r"\bCopy-Item\b", r"\bNew-Item\b", r"\bRemove-Item\b",
+    # 读文件内容 / 直接调 .NET 文件 API：文件工具被限制在 output 目录内，
+    # 命令工具必须堵住"绕过沙箱读任意文件"这条路，否则一句
+    # [IO.File]::ReadAllText('.env') 就能把 API Key 读进对话。
+    r"\bGet-Content\b", r"\bSelect-String\b", r"\bImport-Csv\b", r"\bImport-Clixml\b",
+    r"\[(System\.)?IO\.File\]", r"\[(System\.)?IO\.StreamReader\]",
+    r"\[(System\.)?IO\.Directory\]",
+    # 动态执行 / 起进程 / 加载代码：白名单识别不出这类写法，这里兜底
+    r"\bInvoke-Expression\b", r"\biex\b", r"\bInvoke-Command\b", r"\bInvoke-Item\b",
+    r"\bStart-Process\b", r"\bStart-Job\b", r"\bAdd-Type\b", r"\bNew-Object\b",
+    r"\bFromBase64String\b", r"\bScriptBlock\b",
+]
+
+# ── 敏感文件黑名单 ──────────────────────────────────────────────
+# 命令工具只要能读到这些文件，就等于密钥泄露：
+# .env 里放着 ZAI_API_KEY / GITHUB_TOKEN，team_settings.json 里放着自定义 API Key。
+# 文件工具已被限制在 output 目录内，命令工具需要一份等价的黑名单。
+SENSITIVE_PATTERNS = [
+    r"\.env\b",                        # .env / xxx.env
+    r"team_settings\.json",            # 自定义 API Key 明文存这里
+    r"\.ssh\b", r"\bid_(rsa|dsa|ecdsa|ed25519)\b",
+    r"\.git-credentials\b", r"\.netrc\b", r"\.npmrc\b", r"\.pypirc\b",
+    r"\bLogin Data\b", r"\bCookies\b", r"\bWeb Data\b",
+    r"\.(pem|pfx|p12|jks|keystore|ppk|key)\b",
+    r"\.\.[\\/]",                      # 向上跳出工作目录
+    r"(^|\s)\.\.(\s|$)",
 ]
 
 # ── 只读白名单：只放行查询类指令 ────────────────────────────────
@@ -210,7 +252,7 @@ DANGEROUS_PATTERNS = [
 # 策略：能识别出 cmdlet 就必须全部在白名单内；识别不出（表达式、纯文本、外部命令）
 # 则退回黑名单兜底，避免误伤正常命令。可用环境变量 AIGC_CMD_WHITELIST=0 关闭白名单。
 ALLOWED_CMDLETS = (
-    "Get-*",              # 所有查询类 Get-*
+    "Get-*",              # 所有查询类 Get-*（Get-Content 例外，见 DENIED_CMDLETS）
     "Select-Object", "Where-Object", "Sort-Object", "Measure-Object",
     "Group-Object", "Compare-Object", "ForEach-Object",
     "Format-Table", "Format-List", "Format-Wide", "Format-Custom",
@@ -218,13 +260,22 @@ ALLOWED_CMDLETS = (
     "ConvertTo-Json", "ConvertFrom-Json", "ConvertTo-Csv", "ConvertTo-Html",
     "Write-Output", "Write-Host",
     "Test-Path", "Test-Connection", "Test-NetConnection",
-    "Resolve-Path", "Join-Path", "Split-Path", "Select-String",
+    "Resolve-Path", "Join-Path", "Split-Path",
+)
+
+# 即使命中 Get-* 通配也必须拒绝：这些是"读文件内容"的入口。
+# 读文件请走沙箱化的 read_text_file（被限制在 output 目录内）。
+# 注意这里只列真正会泄露内容的，别把 Get-FileHash 这种无害的也扫进来——
+# 过度拦截会逼用户直接关掉整个白名单，反而更不安全。
+DENIED_CMDLETS = (
+    "get-content", "select-string", "import-csv", "import-clixml",
 )
 
 # 白名单之外的常见只读外部命令（不带 Verb-Noun 形式，单独列出）
+# 注意：type / findstr 都是"读文件内容"，已从白名单移除。
 EXTERNAL_READONLY = (
     "ping", "ipconfig", "netstat", "whoami", "systeminfo", "hostname",
-    "type", "echo", "dir", "findstr", "where",
+    "echo", "dir", "where", "ver", "vol", "set", "nslookup", "tracert", "arp", "route",
 )
 
 
@@ -250,6 +301,8 @@ def _is_cmdlet_like(token: str) -> bool:
 
 def _allowed_cmdlet(token: str) -> bool:
     low = token.lower()
+    if low in DENIED_CMDLETS:      # 先判拒绝名单，Get-* 通配不能把它们放进来
+        return False
     if low in EXTERNAL_READONLY:
         return True
     for pat in ALLOWED_CMDLETS:
@@ -259,6 +312,11 @@ def _allowed_cmdlet(token: str) -> bool:
         elif low == pat.lower():
             return True
     return False
+
+
+def _whitelist_enabled() -> bool:
+    """白名单总开关。设 AIGC_CMD_WHITELIST=0 可退回"只查黑名单"的宽松模式。"""
+    return os.environ.get("AIGC_CMD_WHITELIST", "1") != "0"
 
 
 def run_powershell(command: str) -> str:
@@ -271,8 +329,13 @@ def run_powershell(command: str) -> str:
     for pat in DANGEROUS_PATTERNS:
         if re.search(pat, command, re.I):
             return f"已拒绝危险命令：{command}（工具为只读保护，不允许删除/写入/关机等操作）"
+    for pat in SENSITIVE_PATTERNS:
+        if re.search(pat, command, re.I):
+            return (f"已拒绝：命令试图访问敏感文件或跳出工作目录 —— {command}\n"
+                    f"（.env、team_settings.json、SSH 私钥、浏览器凭据等一律不允许读取；"
+                    f"读普通文件请用 read_text_file）")
     # 白名单：识别不出任何指令时（表达式、纯文本等）跳过，由上面的黑名单兜底
-    if os.environ.get("AIGC_CMD_WHITELIST", "1") != "0":
+    if _whitelist_enabled():
         judged = [t for t in _iter_command_tokens(command) if _is_cmdlet_like(t)]
         if judged:
             bad = sorted({t for t in judged if not _allowed_cmdlet(t)})
@@ -286,10 +349,14 @@ def run_powershell(command: str) -> str:
         # 会让 subprocess 的读线程抛 UnicodeDecodeError，stdout 静默变空（工具恒返回"无输出"）
         ps_cmd = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
                   "$OutputEncoding=[Text.Encoding]::UTF8;" + command)
+        os.makedirs(WORK_ROOT, exist_ok=True)
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
             capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=60,
+            # 工作目录落在沙箱内：即使某个读文件的写法绕过了黑名单，
+            # 相对路径也解析不到程序目录下的 .env。
+            cwd=WORK_ROOT,
         )
         out = (result.stdout or "")[:4000]
         err = (result.stderr or "")[:1000]
@@ -314,5 +381,5 @@ def build_tools():
     tools["write_text_file"] = FunctionTool(write_text_file, description="把内容写入工作目录下的文本文件（自动建目录）。参数：path 相对路径, content 完整内容。可用于保存方案、行程、清单。")
     tools["list_files"] = FunctionTool(list_files, description="列出工作目录下的文件。参数：dir_path 可选子目录。")
     tools["github_api"] = FunctionTool(github_api, description="调用 GitHub REST API：查仓库、搜代码/项目、看 Issues/PR。参数：method(GET等), endpoint(如 /search/repositories?q=xxx), payload(可选)。")
-    tools["run_powershell"] = FunctionTool(run_powershell, description="执行只读命令查系统信息（看进程/文件/网络等）。只允许查询类指令：Get-*、Select-Object、Where-Object、Format-*、ping、ipconfig 等；写入/删除/启动程序类一律拒绝。")
+    tools["run_powershell"] = FunctionTool(run_powershell, description="执行只读命令查系统信息（看进程/网络/硬件等）。只允许查询类指令：Get-*、Select-Object、Where-Object、Format-*、ping、ipconfig 等；写入/删除/启动程序/读取文件内容一律拒绝——要读文件内容请改用 read_text_file。")
     return tools

@@ -17,6 +17,10 @@ team_settings.json
 desktop_err.log
 *.bak
 
+# 测试产物
+_ui_shots/
+.pytest_cache/
+
 # 打包产物（体积大，不入库）
 build/
 dist/

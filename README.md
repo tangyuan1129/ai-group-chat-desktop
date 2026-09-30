@@ -46,8 +46,10 @@ pip install -r requirements.txt
 
 ## ⚠️ 注意事项
 
-- AI 的工具只能读写程序目录下的 `output` 文件夹,删文件、关机这类危险命令被拦掉了
+- **文件工具**只能读写程序目录下的 `output` 文件夹,路径越界会被拒绝(含符号链接/junction 逃逸)
+- **命令工具**只能执行查询类命令,而且工作目录被锁在 `output` 里;`.env`、`team_settings.json`、SSH 私钥、浏览器凭据等敏感文件一律拒绝读取。**AI 要看文件内容请用 `read_text_file`**,不要用 `Get-Content`
 - 智谱免费接口偶尔限流(429),程序会自动等一会儿重试,不用管它
+- 用国内站(open.bigmodel.cn)申请的 Key 报 401 的话,在 `.env` 里加一行 `ZAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4`——两个站点的 Key 互不通用
 - 这是个人业余项目,代码可能不够完善,遇到问题直接提 [issue](https://github.com/tangyuan1129/ai-group-chat-desktop/issues) 即可
 
 ## 📁 目录结构
@@ -60,7 +62,21 @@ pip install -r requirements.txt
 ├── requirements.txt
 ├── .env.example        # 密钥模板(复制为 .env 填写)
 ├── output/             # AI 写出的文件放这里
-└── history/            # 聊天记录(自动生成)
+├── history/            # 聊天记录(自动生成)
+├── screenshots/        # 界面预览图
+└── tests/              # 回归测试(见下)
+```
+
+## 🧪 测试
+
+沙箱、命令守卫、停止按钮、客户端释放都有回归测试,不需要装 pytest:
+
+```bat
+python tests\test_tools_sandbox.py     :: 文件沙箱 + 命令工具拦截
+python tests\test_chat_worker_stop.py  :: 「停止」按钮(含修复前版本对照)
+python tests\test_client_cleanup.py    :: 模型连接释放
+python tests\test_mainwindow_flow.py   :: 端到端界面流程
+python tests\prove_old_bugs.py         :: 复现修复前的漏洞(取历史提交对比)
 ```
 
 ## 📄 License
