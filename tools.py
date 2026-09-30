@@ -48,12 +48,17 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 
 # ── 2. 文件读写（限定在工作根目录内）────────────────────────────
-# 工作目录为程序同目录下的 output 文件夹；可用环境变量 AIGC_WORK_ROOT 覆盖，
-# 这样开发版与发布版可以共用同一份源码（发布版不需要任何路径改写）。
-WORK_ROOT = os.path.normpath(
-    os.environ.get("AIGC_WORK_ROOT")
-    or os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-)
+# 工作目录 = "文档"目录下的 AI团队群聊 文件夹（用户在资源管理器里直接找得到），
+# 而不是塞在安装目录里 —— 装到 D:\ 根目录要管理员权限，普通用户根本写不进去。
+# 可用环境变量 AIGC_WORK_ROOT 覆盖，测试就是这么隔离的。
+try:
+    from app_config import documents_dir as _documents_dir
+    WORK_ROOT = os.path.normpath(os.environ.get("AIGC_WORK_ROOT") or _documents_dir())
+except Exception:                                   # pragma: no cover - 兜底
+    WORK_ROOT = os.path.normpath(
+        os.environ.get("AIGC_WORK_ROOT")
+        or os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+    )
 
 def _safe_path(path: str) -> str:
     """把路径限制在 WORK_ROOT 下，防止越权访问任意系统文件。
@@ -150,22 +155,17 @@ def github_api(method: str, endpoint: str, payload: dict = None) -> str:
 def _read_plugin_token() -> str:
     """GitHub Token 读取优先级（取第一个非空）：
     1) 环境变量 GITHUB_TOKEN
-    2) 程序同目录 .env 里的 GITHUB_TOKEN=
-    3) 环境变量 DSH_GITHUB_AUTH_FILE 指向的插件凭据 json（可选；用变量传路径以免硬编码）
+    2) .env 里的 GITHUB_TOKEN=（路径由 app_config 统一决定）
+    3) 环境变量 DSH_GITHUB_AUTH_FILE 指向的凭据 json（可选；用变量传路径以免硬编码）
     """
     t = os.environ.get("GITHUB_TOKEN", "")
     if t:
         return t
     try:
-        env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-        if os.path.exists(env_file):
-            with open(env_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("GITHUB_TOKEN="):
-                        v = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        if v:
-                            return v
+        from app_config import github_token
+        t = github_token()
+        if t:
+            return t
     except Exception:
         pass
     auth_file = os.environ.get("DSH_GITHUB_AUTH_FILE", "")
