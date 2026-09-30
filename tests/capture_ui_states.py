@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""给界面拍"证据照"：主界面 / 配置面板 / 讨论中 / 停止后。
+"""给界面拍"证据照"：主界面 / 空状态 / 配置面板 / 角色编辑 / 讨论中 / 停止后。
 
 用 QWidget.grab() 让 Qt 自己渲染，不依赖窗口是否在前台，
 也不受 PrintWindow 抓不到子控件的限制。
@@ -68,56 +68,60 @@ def fake_build(settings, clients, external):
 
 print("拍摄界面状态：")
 
-# ── 1. 配置面板（角色列表可增删改）──────────────────────────────
+# ── 1. 空状态（配置不完整时的真实首屏）──────────────────────────
+team_session.build_team = fake_build
+win = desktop_app.MainWindow(app_config.load_settings(migrate=False))
+win.resize(1200, 780)
+win.show()
+pump(1.0)
+shot(win, "0_first_run.png")
+
+# ── 2. 配置面板 ────────────────────────────────────────────────
 settings = app_config.load_settings(migrate=False).settings
 config_dialog = desktop_app.ConfigDialog(settings, None)
-config_dialog.resize(880, 660)
+config_dialog.resize(900, 680)
 config_dialog.show()
 pump(0.8)
 shot(config_dialog, "0_config.png")
 config_dialog.close()
 
-# ── 2. 角色编辑对话框 ──────────────────────────────────────────
-role = settings["roles"][0]
-role_dialog = desktop_app.RoleDialog(role, settings, None)
-role_dialog.resize(640, 640)
+role_dialog = desktop_app.RoleDialog(settings["roles"][0], settings, None)
+role_dialog.resize(640, 680)
 role_dialog.show()
 pump(0.6)
 shot(role_dialog, "0_role_editor.png")
 role_dialog.close()
 
 # ── 3. 主界面（README 用图）────────────────────────────────────
-# 补一个占位 Key 让配置校验通过，这样界面显示的是"已就绪"而不是缺配置的提示条。
+# 补一个占位 Key 让配置校验通过，这样界面显示的是就绪状态而不是缺配置的提示。
 # 展示的是产品默认的角色编排，没有编造任何对话内容；
 # 这份配置写在临时目录里，占位 Key 不会进仓库。
 _ready = app_config.load_settings(migrate=False).settings
 _ready.setdefault("shared", {})["zai_api_key"] = "占位-仅用于截图"
 app_config.save_settings(_ready)
 
-team_session.build_team = fake_build
+win.close()
 win = desktop_app.MainWindow(app_config.load_settings(migrate=False))
-win.resize(1080, 720)
+win.resize(1200, 780)
 win.show()
 pump(1.0)
 shot(win, "1_idle.png", readme=True)
 
 # ── 4. 讨论中（流式渲染）──────────────────────────────────────
-win.task_input.setText("推荐大学生宿舍百元内提升幸福感的小东西")
-win.send()
-pump(2.0)
+win.send_task("推荐大学生宿舍百元内提升幸福感的小东西")
+pump(2.5)
 shot(win, "2_running.png")
 
 # ── 5. 停止后 ─────────────────────────────────────────────────
 win.stop()
-pump(8.0, until=lambda: win.send_btn.isEnabled())
-pump(0.4)
+pump(8.0, until=lambda: not win.composer.running)
+pump(0.5)
 shot(win, "3_stopped.png")
 
 print()
 print("停止后各控件状态：")
-print("  输入框可用   =", win.task_input.isEnabled())
-print("  发送按钮可用 =", win.send_btn.isEnabled())
-print("  停止按钮可用 =", win.stop_btn.isEnabled())
+print("  输入框可用   =", win.composer.input.isEnabled())
+print("  运行中       =", win.composer.running)
 print("  状态栏       =", win.status.text())
 print("  会话带上下文 =", win.session.has_context if win.session else None)
 win.close()
