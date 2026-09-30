@@ -190,7 +190,7 @@ class ToolMessage(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 1, 0, 1)
         line = label(text, "faint", wrap=True)
-        line.setStyleSheet("color: %s; font-size: 12px;" % theme.TOOL_TEXT)
+        line.setStyleSheet("color: %s; font-size: 9pt;" % theme.TOOL_TEXT)
         layout.addWidget(line)
         layout.addStretch(1)
 
@@ -201,7 +201,7 @@ class SystemMessage(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 6, 0, 6)
         line = label(text, "faint", wrap=True)
-        line.setStyleSheet("color: %s; font-size: 12.5px;" % theme.SYS_TEXT)
+        line.setStyleSheet("color: %s; font-size: 9.5pt;" % theme.SYS_TEXT)
         layout.addWidget(line)
         layout.addStretch(1)
 
@@ -329,7 +329,7 @@ class MessageArea(QScrollArea):
             chip = button(hint, on_click=(lambda _=False, h=hint: on_hint and on_hint(h)))
             chip.setStyleSheet(
                 "QPushButton { background: transparent; color: %s; border: 1px solid %s;"
-                "border-radius: 12px; padding: 10px 14px; font-size: 13.5px; text-align: left; }"
+                "border-radius: 12px; padding: 10px 14px; font-size: 10pt; text-align: left; }"
                 "QPushButton:hover { background: %s; color: %s; }"
                 % (theme.TEXT_DIM, theme.BORDER, theme.SURFACE_HOVER, theme.TEXT))
             chip_layout.addWidget(chip)
@@ -487,7 +487,7 @@ class Sidebar(QWidget):
                 SOURCE_SHORT.get(role.get("source", ""), "?")))
             row.setProperty("role", "ghost")
             row.setIcon(QIcon(dot_pixmap(role_color(role), 9)))
-            row.setStyleSheet("text-align: left; font-size: 12.5px; padding: 5px 8px;")
+            row.setStyleSheet("text-align: left; font-size: 9.5pt; padding: 5px 8px;")
             row.setToolTip("%s\n模型：%s\n\n点一下打开配置" % (
                 (role.get("system_prompt") or "")[:180],
                 role.get("model") or "未选"))
@@ -579,7 +579,7 @@ class RoleDialog(QDialog):
         root.setContentsMargins(22, 20, 22, 18)
         root.setSpacing(12)
         heading = label("添加角色" if self.is_new else "编辑角色")
-        heading.setStyleSheet("font-size: 17px; font-weight: 600;")
+        heading.setStyleSheet("font-size: 13pt; font-weight: 600;")
         root.addWidget(heading)
 
         scroll = QScrollArea()

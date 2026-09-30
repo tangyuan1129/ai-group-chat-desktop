@@ -65,22 +65,22 @@ QWidget#Sidebar {{ background: {SIDEBAR}; }}
 QWidget#Content {{ background: {MAIN}; }}
 
 QLabel {{ color: {TEXT}; background: transparent; }}
-QLabel[role="brand"] {{ font-size: 14px; font-weight: 600; }}
-QLabel[role="role-name"] {{ font-size: 13px; font-weight: 600; }}
+QLabel[role="brand"] {{ font-size: 10.5pt; font-weight: 600; }}
+QLabel[role="role-name"] {{ font-size: 10pt; font-weight: 600; }}
 QLabel[role="body"] {{ color: {TEXT}; }}
-QLabel[role="dim"] {{ font-size: 12.5px; color: {TEXT_DIM}; }}
-QLabel[role="faint"] {{ font-size: 12px; color: {TEXT_FAINT}; }}
+QLabel[role="dim"] {{ font-size: 9.5pt; color: {TEXT_DIM}; }}
+QLabel[role="faint"] {{ font-size: 9pt; color: {TEXT_FAINT}; }}
 QLabel[role="section"] {{
-    font-size: 11.5px; font-weight: 600; color: {TEXT_FAINT};
+    font-size: 8.5pt; font-weight: 600; color: {TEXT_FAINT};
     padding: 10px 10px 4px 10px;
 }}
-QLabel[role="empty"] {{ font-size: 22px; font-weight: 600; color: {TEXT}; }}
+QLabel[role="empty"] {{ font-size: 16.5pt; font-weight: 600; color: {TEXT}; }}
 
 /* ── 按钮：默认是"文字按钮"，几乎没有视觉重量 ── */
 QPushButton {{
     background: transparent; color: {TEXT};
     border: none; border-radius: 8px;
-    padding: 7px 10px; font-size: 13.5px;
+    padding: 7px 10px; font-size: 10pt;
 }}
 QPushButton:hover {{ background: {SURFACE_HOVER}; }}
 QPushButton:pressed {{ background: {SURFACE_ACTIVE}; }}
@@ -108,7 +108,7 @@ QPushButton[role="danger"]:disabled {{ color: {TEXT_FAINT}; border-color: {BORDE
 /* 发送按钮：白圆 */
 QPushButton#SendButton {{
     background: {ACCENT}; color: {ACCENT_TEXT};
-    border: none; border-radius: 17px; font-size: 15px; font-weight: 700;
+    border: none; border-radius: 17px; font-size: 11pt; font-weight: 700;
     min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px;
 }}
 QPushButton#SendButton:hover {{ background: #D9D9D9; }}
@@ -117,7 +117,7 @@ QPushButton#SendButton:disabled {{ background: {SURFACE_ACTIVE}; color: {TEXT_FA
 /* 停止按钮：同尺寸的方块 */
 QPushButton#StopButton {{
     background: {TEXT}; color: {ACCENT_TEXT};
-    border: none; border-radius: 17px; font-size: 11px;
+    border: none; border-radius: 17px; font-size: 8pt;
     min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px;
 }}
 QPushButton#StopButton:hover {{ background: #D9D9D9; }}
@@ -126,14 +126,14 @@ QPushButton#StopButton:hover {{ background: #D9D9D9; }}
 QLineEdit, QPlainTextEdit, QTextEdit {{
     background: transparent; color: {TEXT};
     border: none; padding: 0;
-    font-size: 14.5px;
+    font-size: 11pt;
     selection-background-color: #4A4A4A;
 }}
 
 QComboBox {{
     background: transparent; color: {TEXT};
     border: 1px solid {BORDER}; border-radius: 8px;
-    padding: 6px 10px; font-size: 13px; min-width: 80px;
+    padding: 6px 10px; font-size: 10pt; min-width: 80px;
 }}
 QComboBox:hover {{ border-color: {BORDER_STRONG}; }}
 QComboBox::drop-down {{ border: none; width: 20px; }}
@@ -151,13 +151,13 @@ QComboBox QAbstractItemView {{
 QSpinBox {{
     background: {SURFACE}; color: {TEXT};
     border: 1px solid {BORDER}; border-radius: 8px;
-    padding: 6px 8px; font-size: 13px;
+    padding: 6px 8px; font-size: 10pt;
 }}
 
 /* ── 侧栏列表 ── */
 QListWidget {{
     background: transparent; color: {TEXT_DIM};
-    border: none; outline: none; font-size: 13.5px;
+    border: none; outline: none; font-size: 10pt;
 }}
 QListWidget::item {{
     padding: 9px 10px; border-radius: 9px; margin: 1px 6px; color: {TEXT_DIM};
@@ -195,7 +195,7 @@ QFrame#Composer[focused="true"] {{ border-color: {BORDER_STRONG}; }}
 QFrame#Divider {{ background: {BORDER}; max-height: 1px; min-height: 1px; border: none; }}
 
 /* ── 勾选框 ── */
-QCheckBox {{ color: {TEXT}; spacing: 8px; font-size: 13.5px; }}
+QCheckBox {{ color: {TEXT}; spacing: 8px; font-size: 10pt; }}
 QCheckBox::indicator {{
     width: 16px; height: 16px; border-radius: 4px;
     border: 1px solid {BORDER_STRONG}; background: transparent;
@@ -207,7 +207,7 @@ QCheckBox::indicator:checked {{ background: {TEXT}; border-color: {TEXT}; }}
 QGroupBox {{
     border: 1px solid {BORDER}; border-radius: 12px;
     margin-top: 14px; padding: 14px 14px 12px 14px;
-    font-size: 13px; font-weight: 600; color: {TEXT_DIM};
+    font-size: 10pt; font-weight: 600; color: {TEXT_DIM};
 }}
 QGroupBox::title {{
     subcontrol-origin: margin; subcontrol-position: top left;
@@ -222,7 +222,7 @@ QMenu {{
     background: {SURFACE}; color: {TEXT};
     border: 1px solid {BORDER_STRONG}; border-radius: 10px; padding: 5px;
 }}
-QMenu::item {{ padding: 8px 22px 8px 14px; border-radius: 7px; font-size: 13.5px; }}
+QMenu::item {{ padding: 8px 22px 8px 14px; border-radius: 7px; font-size: 10pt; }}
 QMenu::item:selected {{ background: {SURFACE_ACTIVE}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 8px; }}
 
