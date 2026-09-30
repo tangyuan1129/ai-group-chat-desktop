@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6)](#怎么装)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078d6)](#-快速开始)
 [![Release](https://img.shields.io/github/v/release/tangyuan1129/ai-group-chat-desktop)](https://github.com/tangyuan1129/ai-group-chat-desktop/releases)
 
 让几个 AI 在同一个窗口里互相讨论,而不是每次只跟一个 AI 你问我答。四个角色用的是**不同的模型**——云端 GLM 加本地跑的开源模型——它们观点真的会不一样,讨论起来有来有回,有时候还会互相反驳。
@@ -38,11 +38,13 @@ pip install -r requirements.txt
 
 ## 📸 界面预览
 
-截图请放入仓库的 `screenshots/` 目录,然后在下面引用(名称对应即可):
-
 ![主界面](screenshots/main.png)
 
-![群聊讨论](screenshots/discussion.png)
+<!-- 群聊讨论截图还没补上：需要一次真实讨论才能截。
+     配好 .env（或本地 Ollama）后运行 python tests/capture_ui_states.py，
+     它会同时产出 screenshots/main.png，讨论中的画面可存成 discussion.png。
+     在那之前这里先注释掉，免得首页显示碎图。 -->
+<!-- ![群聊讨论](screenshots/discussion.png) -->
 
 ## ⚠️ 注意事项
 

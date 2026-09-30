@@ -4,6 +4,9 @@
 用 QWidget.grab() 让 Qt 自己渲染，不依赖窗口是否在前台，
 也不受 PrintWindow 抓不到子控件的限制。
 
+顺带把"空闲"那一张存成 screenshots/main.png —— README 的「界面预览」用它。
+那是真实运行界面的原始截图，没有任何拼接或美化；想更新重跑本脚本即可。
+
 直接运行：python tests/capture_ui_states.py
 """
 import asyncio
@@ -20,6 +23,7 @@ import desktop_app  # noqa: E402
 
 OUT_DIR = os.path.join(REPO, "_ui_shots")
 os.makedirs(OUT_DIR, exist_ok=True)
+README_SHOT = os.path.join(REPO, "screenshots", "main.png")
 
 app = QApplication.instance() or QApplication(sys.argv)
 desktop_app.HISTORY_DIR = os.path.join(OUT_DIR, "history")
@@ -59,6 +63,10 @@ def shot(name):
 
 print("拍摄界面状态：")
 shot("1_idle.png")
+# README 用的主界面图就取这一张（默认配置下的真实初始界面）
+os.makedirs(os.path.dirname(README_SHOT), exist_ok=True)
+win.grab().save(README_SHOT)
+print("  已保存 %s（README 界面预览用）" % README_SHOT)
 
 win.task_input.setText("推荐大学生宿舍百元内提升幸福感的小东西")
 win.start_chat()
