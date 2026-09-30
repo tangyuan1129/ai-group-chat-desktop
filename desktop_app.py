@@ -1051,8 +1051,26 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(940, 660)
         self._set_icon()
         self._build_ui()
+        self._apply_default_geometry()
         self._register_secrets()
         self._start_fresh_view()
+
+    def _apply_default_geometry(self):
+        """按屏幕比例给一个像样的默认尺寸并居中。
+
+        不这么做的话，Qt 会直接用布局的 sizeHint —— 那个值恰好贴着
+        setMinimumSize，窗口开出来又小又挤在左上角。
+        """
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = max(self.minimumWidth(), min(1280, int(available.width() * 0.82)))
+        height = max(self.minimumHeight(), min(900, int(available.height() * 0.88)))
+        self.resize(min(width, available.width()), min(height, available.height()))
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
 
     def _set_icon(self):
         try:

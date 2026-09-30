@@ -40,7 +40,10 @@
 pip install -r requirements.txt
 ```
 
-然后双击 `start_desktop.bat` 启动。第一次打开时顶部会有一条提示条告诉你还缺什么,点「去配置」:
+然后双击 **`启动（无黑窗）.vbs`** 启动(全程不闪任何黑色控制台窗口)。
+如果习惯用批处理,双击 `start_desktop.bat` 也行,只是会闪一下命令行窗口。
+
+第一次打开时,对话流里会有一条提示告诉你还缺什么,点「去配置」:
 
 1. 填智谱 GLM 的 API Key(最省事,有免费额度)——去 [open.bigmodel.cn](https://open.bigmodel.cn) 或 [api.z.ai](https://api.z.ai) 申请
 2. 需要的话点「测试全部」,确认每个角色都能连通
@@ -89,7 +92,8 @@ pip install -r requirements.txt
 ├── app_logging.py      # 日志、脱敏、诊断包
 ├── tools.py            # AI 的"手臂":搜索 / 文件 / GitHub / 命令
 ├── glm_client.py       # 智谱 GLM 客户端(含限流自动重试)
-├── start_desktop.bat   # 双击启动
+├── 启动（无黑窗）.vbs   # 双击启动(推荐,零黑窗)
+├── start_desktop.bat   # 批处理启动(会闪一下命令行窗口)
 ├── pack.spec           # PyInstaller 打包配置
 ├── install.iss         # Inno Setup 安装脚本
 ├── requirements.txt
