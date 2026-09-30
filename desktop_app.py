@@ -29,7 +29,7 @@ import os
 import sys
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QDialog, QDialogButtonBox, QFormLayout, QFrame, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -98,6 +98,24 @@ def role_color(role: dict) -> str:
     return (role or {}).get("color") or theme.ROLE_COLORS[0]
 
 
+# 正文用显式字体：QSS 的 font-size 要等 polish 才生效，构造时量不准宽度，
+# 而气泡宽度正是靠字体度量算出来的，两边必须一致。
+BODY_FONT_PT = 11
+BUBBLE_TEXT_MAX = int(theme.CONTENT_MAX_WIDTH * 0.75) - 32
+
+
+def body_font() -> QFont:
+    return QFont("Microsoft YaHei UI", BODY_FONT_PT)
+
+
+def measure_text(text: str, limit: int = None) -> int:
+    """量一段文字的单行宽度（可夹上限）。"""
+    width = QFontMetrics(body_font()).horizontalAdvance(text or "")
+    if limit is not None:
+        width = min(width, limit)
+    return max(24, width)
+
+
 # ── 消息控件 ───────────────────────────────────────────────────
 class UserMessage(QWidget):
     """我的发言：右对齐圆角气泡。"""
@@ -113,6 +131,10 @@ class UserMessage(QWidget):
         inner = QVBoxLayout(bubble)
         inner.setContentsMargins(16, 10, 16, 10)
         body = label(text, "body", wrap=True, selectable=True)
+        body.setFont(body_font())
+        # 按内容定宽：否则 wordWrap 的 QLabel 会给出偏小的 sizeHint，
+        # 气泡被挤窄、文字过早折行。超过上限才交给 wordWrap 折。
+        body.setFixedWidth(measure_text(text, BUBBLE_TEXT_MAX))
         inner.addWidget(body)
         row.addWidget(bubble)
 
@@ -143,6 +165,7 @@ class AssistantMessage(QWidget):
         layout.addLayout(head)
 
         self.body = label("", "body", wrap=True, selectable=True)
+        self.body.setFont(body_font())
         self.body.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         layout.addWidget(self.body)
 
@@ -202,6 +225,33 @@ class NoticeMessage(QWidget):
         outer.addWidget(frame)
 
 
+class CenteredPane(QWidget):
+    """让内部控件水平居中并限宽。
+
+    注意：不能用 addStretch 来居中 —— QHBoxLayout 会把可用宽度按 stretch
+    因子平分，几个 stretch=1 就会把内容挤成 1/3 宽（setMaximumWidth 只是上限，
+    不是目标宽度）。所以这里在 resize 时按可用宽度算实际宽度。
+    """
+
+    def __init__(self, inner: QWidget, max_width: int = None,
+                 margin: int = 24, parent=None):
+        super().__init__(parent)
+        self._max_width = max_width or theme.CONTENT_MAX_WIDTH
+        self._margin = margin
+        self._inner = inner
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addStretch(1)
+        row.addWidget(inner)
+        row.addStretch(1)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        available = max(280, self.width() - self._margin * 2)
+        self._inner.setFixedWidth(min(self._max_width, available))
+
+
 class MessageArea(QScrollArea):
     """聊天区：可滚动的消息列，居中限宽。"""
 
@@ -218,17 +268,22 @@ class MessageArea(QScrollArea):
         outer.addStretch(1)
 
         self.column = QWidget()
-        self.column.setMaximumWidth(theme.CONTENT_MAX_WIDTH)
-        self.column.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        self.column.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
         self.messages = QVBoxLayout(self.column)
         self.messages.setContentsMargins(0, 0, 0, 0)
         self.messages.setSpacing(0)
         self.messages.addStretch(1)
-        outer.addWidget(self.column, stretch=1)
+        outer.addWidget(self.column)
         outer.addStretch(1)
 
         self.setWidget(container)
         self._empty_state = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 内容列宽度按可用宽度算，别让弹簧把消息挤窄
+        available = max(280, self.viewport().width() - 48)
+        self.column.setFixedWidth(min(theme.CONTENT_MAX_WIDTH, available))
 
     # ── 内容 ──
     def _insert(self, widget: QWidget):
@@ -402,6 +457,15 @@ class Sidebar(QWidget):
         self.new_btn = button("＋   新对话", "ghost", self.new_chat.emit)
         root.addWidget(self.new_btn)
 
+        # 团队成员：这个应用的核心就是"几个不同模型的 AI"，
+        # 团队构成必须一眼可见，不能藏在 tooltip 里。
+        root.addWidget(label("团队成员", "section"))
+        self.team_box = QWidget()
+        self.team_layout = QVBoxLayout(self.team_box)
+        self.team_layout.setContentsMargins(0, 0, 0, 6)
+        self.team_layout.setSpacing(0)
+        root.addWidget(self.team_box)
+
         root.addWidget(label("历史会话", "section"))
         self.history = QListWidget()
         self.history.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -410,12 +474,39 @@ class Sidebar(QWidget):
 
         root.addWidget(button("⚙   配置", "ghost", self.open_settings.emit))
 
+    def reload_roles(self, settings):
+        """按当前配置刷新团队成员列表。"""
+        while self.team_layout.count():
+            item = self.team_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        for role in app_config.enabled_roles(settings):
+            row = QPushButton("%s    %s" % (
+                role.get("name") or "?",
+                SOURCE_SHORT.get(role.get("source", ""), "?")))
+            row.setProperty("role", "ghost")
+            row.setIcon(QIcon(dot_pixmap(role_color(role), 9)))
+            row.setStyleSheet("text-align: left; font-size: 12.5px; padding: 5px 8px;")
+            row.setToolTip("%s\n模型：%s\n\n点一下打开配置" % (
+                (role.get("system_prompt") or "")[:180],
+                role.get("model") or "未选"))
+            row.clicked.connect(self.open_settings.emit)
+            self.team_layout.addWidget(row)
+
     def _on_history_clicked(self, item):
         self.history_selected.emit(item.data(Qt.UserRole) or "")
 
     def reload_history(self, items: list):
         """按 今天 / 昨天 / 更早 分组，像 ChatGPT 那样。"""
         self.history.clear()
+        if not items:
+            # 没有历史时给一句说明，否则侧栏下半部分是一大块无解释的空白
+            hint = QListWidgetItem("   还没有历史记录")
+            hint.setFlags(Qt.NoItemFlags)
+            hint.setForeground(QColor(theme.TEXT_FAINT))
+            self.history.addItem(hint)
+            return
         today = datetime.date.today()
         groups = {"今天": [], "昨天": [], "更早": []}
         for item in items:
@@ -1007,8 +1098,6 @@ class MainWindow(QMainWindow):
         top_row.setSpacing(10)
         self.title_label = label("新对话", "role-name")
         top_row.addWidget(self.title_label)
-        self.team_label = label("", "faint")
-        top_row.addWidget(self.team_label)
         top_row.addStretch(1)
         self.more_btn = button("⋯", "ghost")
         self.more_btn.setFixedWidth(36)
@@ -1026,13 +1115,7 @@ class MainWindow(QMainWindow):
         column.addWidget(self.area, stretch=1)
 
         # 输入区：居中限宽，和正文对齐
-        bottom = QWidget()
-        bottom_row = QHBoxLayout(bottom)
-        bottom_row.setContentsMargins(24, 6, 24, 14)
-        bottom_row.setSpacing(0)
-        bottom_row.addStretch(1)
         wrap = QWidget()
-        wrap.setMaximumWidth(theme.CONTENT_MAX_WIDTH)
         wrap_column = QVBoxLayout(wrap)
         wrap_column.setContentsMargins(0, 0, 0, 0)
         wrap_column.setSpacing(6)
@@ -1043,18 +1126,16 @@ class MainWindow(QMainWindow):
         self.status = label("就绪", "faint")
         self.status.setAlignment(Qt.AlignCenter)
         wrap_column.addWidget(self.status)
-        bottom_row.addWidget(wrap, stretch=1)
-        bottom_row.addStretch(1)
+        bottom = CenteredPane(wrap, margin=24)
+        bottom.setContentsMargins(0, 6, 0, 14)
         column.addWidget(bottom)
 
         root.addWidget(content, stretch=1)
         self.setCentralWidget(central)
 
     def _refresh_team_label(self):
-        roles = app_config.enabled_roles(self.settings)
-        self.team_label.setText("·  %d 个角色" % len(roles))
-        names = "、".join(r.get("name") or "?" for r in roles)
-        self.team_label.setToolTip("参与讨论的角色：%s\n（点右上角 ⋯ 或侧栏「配置」可修改）" % names)
+        """刷新侧栏的团队成员列表。"""
+        self.sidebar.reload_roles(self.settings)
 
     def _reload_sidebar(self):
         self.sidebar.reload_history(list_history())

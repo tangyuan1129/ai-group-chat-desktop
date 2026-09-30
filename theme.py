@@ -67,7 +67,7 @@ QWidget#Content {{ background: {MAIN}; }}
 QLabel {{ color: {TEXT}; background: transparent; }}
 QLabel[role="brand"] {{ font-size: 14px; font-weight: 600; }}
 QLabel[role="role-name"] {{ font-size: 13px; font-weight: 600; }}
-QLabel[role="body"] {{ font-size: 14.5px; color: {TEXT}; }}
+QLabel[role="body"] {{ color: {TEXT}; }}
 QLabel[role="dim"] {{ font-size: 12.5px; color: {TEXT_DIM}; }}
 QLabel[role="faint"] {{ font-size: 12px; color: {TEXT_FAINT}; }}
 QLabel[role="section"] {{
