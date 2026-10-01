@@ -23,7 +23,8 @@ import sys
 import traceback
 import zipfile
 
-from app_config import APP_NAME, config_dir, documents_dir, logs_dir, settings_path
+from app_config import (APP_NAME, APP_VERSION, config_dir, documents_dir,
+                        logs_dir, settings_path)
 
 __all__ = ["setup_logging", "get_logger", "register_secret", "redact",
            "export_diagnostics", "install_excepthook", "log_file_path"]
@@ -157,6 +158,7 @@ def _sanitized_settings() -> str:
 def _environment_report() -> str:
     lines = [
         "%s 诊断报告" % APP_NAME,
+        "程序版本: %s" % APP_VERSION,
         "生成时间: %s" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "操作系统: %s %s (%s)" % (platform.system(), platform.release(), platform.version()),
         "Python  : %s" % sys.version.replace("\n", " "),

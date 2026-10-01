@@ -2,7 +2,9 @@
 ; 使用 Inno Setup 6 编译：ISCC.exe install.iss
 
 #define MyAppName "AI团队群聊"
-#define MyAppVersion "1.0.0"
+; 改版本号时三处一起改：这里的 MyAppVersion、下面的 OutputBaseFilename、
+; 以及 app_config.py 的 APP_VERSION。tests/test_config.py 的 I 节会拿它们对账。
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "J1129"
 #define MyAppExeName "AI团队群聊.exe"
 #define MyAppAssocName MyAppName + " 文件"
@@ -24,12 +26,13 @@ UninstallDisplayName={#MyAppName} 卸载
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir=..\
-OutputBaseFilename=AI团队群聊-安装程序-v1.0
+; 文件名用短版本号（v1.2），跟 README 里的下载名一致
+OutputBaseFilename=AI团队群聊-安装程序-v1.2
 ; 管理员权限（写 D 盘根目录需要）
 PrivilegesRequired=admin
 ; 支持中文
 ShowLanguageDialog=no
-VersionInfoVersion=1.0.0
+VersionInfoVersion={#MyAppVersion}
 VersionInfoDescription=AI 团队群聊 · 桌面版
 VersionInfoProductName=AI团队群聊
 

@@ -1223,9 +1223,9 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         QMessageBox.information(
             self, "关于",
-            "AI 团队群聊 · 桌面版\n\n"
+            "AI 团队群聊 · 桌面版 v%s\n\n"
             "几个不同模型的 AI 在同一窗口里讨论、分工，可以一直追问。\n"
-            "配置、记录与日志都在：\n%s" % app_config.config_dir())
+            "配置、记录与日志都在：\n%s" % (app_config.APP_VERSION, app_config.config_dir()))
 
     def _build_topbar(self, outer):
         """顶部一条：中间分段控件（对话 / 团队），右边一个面板图标。"""
@@ -1690,6 +1690,10 @@ def main():
     install_excepthook()
     log_path = setup_logging()
     log.info("启动 %s，日志：%s", app_config.APP_NAME, log_path)
+
+    # 必须在任何 httpx 客户端被构造之前做（详见 app_config.sanitize_proxy_env）
+    for note in app_config.sanitize_proxy_env():
+        log.warning("NO_PROXY 里有 httpx 解析不了的写法，已就地修正 —— %s", note)
 
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei UI", 10))

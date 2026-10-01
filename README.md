@@ -30,7 +30,7 @@
 
 ### 方式一:最省事(推荐)
 
-去 [Releases 页面](https://github.com/tangyuan1129/ai-group-chat-desktop/releases) 下载 `AI团队群聊-安装程序-v1.1.exe`,双击安装就行。不需要自己配 Python 环境。
+去 [Releases 页面](https://github.com/tangyuan1129/ai-group-chat-desktop/releases) 下载 `AI团队群聊-安装程序-v1.2.exe`,双击安装就行。不需要自己配 Python 环境。
 
 ### 方式二:源码运行
 
@@ -84,7 +84,8 @@ pip install -r requirements.txt
 
 ```
 ├── desktop_app.py      # 主程序:界面与交互
-├── theme.py            # ChatGPT 风格配色与样式表
+├── theme.py            # ChatGPT 风格配色与样式表(间距/字号/圆角三套尺度)
+├── icons.py            # 图标都在这画(不依赖图片资源)
 ├── team_session.py     # 会话:多轮追问 / 流式输出 / 优雅停止
 ├── llm.py              # 模型客户端构造与连接测试
 ├── app_config.py       # 配置、角色列表、校验、损坏恢复
@@ -107,11 +108,12 @@ pip install -r requirements.txt
 不需要装 pytest,直接跑:
 
 ```bat
-python tests\test_config.py            :: 角色列表、配置读写、密钥加密、v2 迁移、损坏恢复
+python tests\test_config.py            :: 角色列表、配置读写、密钥加密、v2 迁移、损坏恢复、版本号对账、代理环境自救
 python tests\test_tools_sandbox.py     :: 文件沙箱 + 命令工具拦截
+python tests\test_llm_sources.py       :: 四条模型通道都要真能建出客户端(打包验证时踩出来的两个坑)
 python tests\test_team_session.py      :: 多轮追问 / 流式 / 优雅停止 / 强制停止兜底
 python tests\test_session_cleanup.py   :: 模型连接释放
-python tests\test_ui_flow.py           :: 端到端界面流程
+python tests\test_ui_flow.py           :: 端到端界面流程 + 列宽回归
 python tests\prove_old_bugs.py         :: 复现修复前的漏洞(取历史提交对比)
 ```
 

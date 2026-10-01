@@ -28,9 +28,48 @@ import tempfile
 from secret_store import decrypt_settings, encrypt_settings
 
 APP_NAME = "AI团队群聊"
+# 产品版本。改这里之后，install.iss 里的 MyAppVersion 必须跟着改 ——
+# tests/test_config.py 的 I 节会拿这两处对账，对不上直接报错。
+# 之前没有这个常量：装出去的 v1.1 包内嵌版本其实还是 1.0.0，用户报问题
+# 说不清自己用的是哪版，诊断包里也看不到。
+APP_VERSION = "1.2.0"
 CONFIG_VERSION = 3
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# NO_PROXY 里可能出现的方括号 IPv6 写法，例如 [::1]
+_NO_PROXY_BRACKETS = re.compile(r"\[([0-9A-Fa-f:.]+)\]")
+
+
+def sanitize_proxy_env() -> list:
+    """把 NO_PROXY 里的 [::1] 这种方括号写法的方括号去掉。
+
+    为什么非修不可：httpx 0.28 解析 no_proxy 列表时，遇到 [::1] 会在
+    **构造 httpx.Client() 的那一行**直接抛
+        InvalidURL: Invalid port: ':1]'
+    而不是等到发请求。实测影响面（见 tests/test_llm_sources.py）：
+        本地 Ollama   autogen_ext 导入时就建客户端 → 导入即炸
+        自定义 API    openai SDK 内部自建 httpx 客户端 → 构造即炸
+        云端 GLM      glm_client 显式传了 transport，反而躲过一劫
+    也就是说"任何 OpenAI 兼容接口"和本地模型都连不上，界面只会报错。
+
+    而这种写法特别常见：代理工具（Clash 之类）会写成
+        NO_PROXY=localhost,127.0.0.1,::1,[::1],10.*,...
+    并且是**用户级环境变量**，双击装好的 exe 一样继承。
+
+    去掉方括号不改变语义（还是同一个 IPv6 回环地址），httpx 也能解析了。
+    返回改动了哪些键，方便在日志里留一笔。
+    """
+    changed = []
+    for key in ("NO_PROXY", "no_proxy"):
+        raw = os.environ.get(key)
+        if not raw or "[" not in raw:
+            continue
+        fixed = _NO_PROXY_BRACKETS.sub(r"\1", raw)
+        if fixed != raw:
+            os.environ[key] = fixed
+            changed.append("%s: %s -> %s" % (key, raw, fixed))
+    return changed
 
 
 # ── 路径 ───────────────────────────────────────────────────────

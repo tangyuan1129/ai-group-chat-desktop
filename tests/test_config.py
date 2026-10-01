@@ -212,6 +212,87 @@ check("幂等：解回来还是原文",
       secret_store.unprotect(secret_store.encrypt_value(_blob)) == "abc123456")
 check("坏密文不抛异常", secret_store.unprotect("dpapi:bm90LWEtcmVhbC1ibG9i") == "")
 
+print()
+print("=" * 72)
+print("I. 版本号对账：产品版本、诊断报告、安装脚本必须是同一个数")
+print("=" * 72)
+import re                                                       # noqa: E402
+
+import app_logging                                              # noqa: E402
+
+check("版本号是三段式数字", re.fullmatch(r"\d+\.\d+\.\d+", app_config.APP_VERSION) is not None,
+      app_config.APP_VERSION)
+check("诊断报告带上了版本号",
+      "程序版本: %s" % app_config.APP_VERSION in app_logging._environment_report(),
+      app_logging._environment_report()[:120])
+
+# 装出去的 v1.1 包内嵌版本其实还是 1.0.0（install.iss 没跟着改），
+# 用户报问题说不清自己在用哪版。这里把两处钉死。
+_iss_path = os.path.join(REPO, "install.iss")
+with open(_iss_path, "r", encoding="utf-8") as f:
+    _iss = f.read()
+
+_iss_ver = re.search(r'#define\s+MyAppVersion\s+"([^"]+)"', _iss)
+check("install.iss 里写明了版本号", _iss_ver is not None)
+if _iss_ver:
+    check("install.iss 的版本号跟 APP_VERSION 一致",
+          _iss_ver.group(1) == app_config.APP_VERSION,
+          "install.iss=%s APP_VERSION=%s" % (_iss_ver.group(1), app_config.APP_VERSION))
+
+_iss_out = re.search(r"OutputBaseFilename=(.+)$", _iss, re.MULTILINE)
+check("安装包文件名里带版本号", _iss_out is not None)
+if _iss_out:
+    _short = ".".join(app_config.APP_VERSION.split(".")[:2])
+    check("安装包文件名用的是短版本号（v%s）" % _short,
+          _iss_out.group(1).strip().endswith("v" + _short),
+          _iss_out.group(1).strip())
+
+check("VersionInfoVersion 跟 MyAppVersion 同源",
+      "VersionInfoVersion={#MyAppVersion}" in _iss,
+      [l for l in _iss.splitlines() if "VersionInfoVersion" in l])
+
+print()
+print("=" * 72)
+print("J. 代理环境自救：NO_PROXY 里的 [::1] 会让所有模型通道一起废掉")
+print("=" * 72)
+import httpx                                                    # noqa: E402
+
+# 代理工具会把 NO_PROXY 写成 "...::1,[::1],10.*..."，而且这是用户级环境变量，
+# 装好的 exe 一样继承。httpx 0.28 解析它时会**在构造 Client 那行**直接抛
+# InvalidURL，本地 Ollama 与 OpenAI 兼容接口因此全废（详细影响面见
+# tests/test_llm_sources.py，那儿是分来源逐个验的）。
+_BAD_NO_PROXY = "localhost,127.0.0.1,::1,[::1],10.*,172.16.*,.local,.cn"
+_saved_proxy = {k: os.environ.get(k) for k in ("NO_PROXY", "no_proxy")}
+for _key in _saved_proxy:
+    os.environ[_key] = _BAD_NO_PROXY
+
+_changed = app_config.sanitize_proxy_env()
+# Windows 上 os.environ 对大小写不敏感（写 "no_proxy" 实际改的是 NO_PROXY），
+# 所以这台机器上只会看到 1 个键被改，非 Windows 上才会是 2 个。
+check("NO_PROXY 被就地修正", len(_changed) >= 1, str(_changed))
+check("方括号没了，IPv6 回环还在",
+      "[::1]" not in os.environ["NO_PROXY"] and "::1" in os.environ["NO_PROXY"],
+      os.environ["NO_PROXY"])
+check("两种大小写都不再带方括号",
+      all("[" not in (os.environ.get(_k) or "") for _k in ("NO_PROXY", "no_proxy")),
+      repr(os.environ.get("no_proxy")))
+
+# 这条是重点：修完之后 httpx 真的能建出客户端（原来这一行直接抛异常）
+try:
+    _probe_client = httpx.Client()
+    _probe_client.close()
+    check("修完之后 httpx.Client() 建得起来", True)
+except Exception as _exc:
+    check("修完之后 httpx.Client() 建得起来", False, "%s: %s" % (type(_exc).__name__, _exc))
+
+check("再跑一次是幂等的", app_config.sanitize_proxy_env() == [])
+
+for _key, _value in _saved_proxy.items():
+    if _value is None:
+        os.environ.pop(_key, None)
+    else:
+        os.environ[_key] = _value
+
 shutil.rmtree(_TMP, ignore_errors=True)
 
 failed = [n for n, ok in RESULTS if not ok]

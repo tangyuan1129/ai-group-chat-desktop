@@ -91,6 +91,13 @@ def make_client(role_cfg, settings=None):
         return OpenAIChatCompletionClient(
             model=model, base_url=base, api_key=key,
             max_retries=6, timeout=240,
+            # 必须申报 model_info：deepseek-chat / moonshot-v1-8k 这类名字不在
+            # autogen 的"已知 OpenAI 模型"表里，不给它就直接抛
+            #   ValueError: model_info is required when model name is not a valid OpenAI model
+            # 于是 README 里承诺的"任何 OpenAI 兼容接口"其实一个都建不起来。
+            # 第三方兼容接口按"支持函数调用与流式、不支持视觉"申报即可。
+            model_info={"vision": False, "function_calling": True, "json_output": True,
+                        "structured_output": True, "family": "unknown"},
         ), SOURCE_LABELS["custom"]
 
     # 默认：智谱 GLM
