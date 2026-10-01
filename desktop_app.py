@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy,
-                               QSpinBox, QVBoxLayout, QWidget)
+                               QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
 import app_config
 import icons
@@ -381,6 +381,18 @@ class IconRail(QWidget):
         root.addWidget(icon_button(icons.sliders(theme.TEXT_DIM, 22), "设置",
                                    self.open_config.emit), alignment=Qt.AlignHCenter)
 
+        # 底部两个圆形头像（仿 ChatGPT 左下角）
+        avatars = QHBoxLayout()
+        avatars.setSpacing(theme.SPACE_XS)
+        avatars.addStretch(1)
+        for color, initials in (("#8B6CE0", ""), ("#C08A3E", "AI")):
+            mark = QLabel()
+            mark.setPixmap(icons.avatar(color, initials, 28))
+            mark.setFixedSize(28, 28)
+            avatars.addWidget(mark)
+        avatars.addStretch(1)
+        root.addLayout(avatars)
+
     def _emit_more(self):
         self.open_output.emit()
 
@@ -428,6 +440,14 @@ class Composer(QFrame):
         self.team_label = label("", "dim")
         controls.addWidget(self.team_label)
         controls.addStretch(1)
+
+        # 团队选择器（仿 ChatGPT 的 "GPT-6 Luna 轻度 ⌄"）
+        self.team_picker = QPushButton()
+        self.team_picker.setProperty("role", "tool")
+        self.team_picker.setIcon(QIcon(icons.chevron_down(theme.TEXT_DIM, 14)))
+        self.team_picker.setLayoutDirection(Qt.RightToLeft)
+        self.team_picker.setToolTip("切换团队配置")
+        controls.addWidget(self.team_picker)
 
         self.send_btn = QPushButton()
         self.send_btn.setObjectName("SendButton")
@@ -478,6 +498,10 @@ class Composer(QFrame):
 
     def set_team_text(self, text: str):
         self.team_label.setText(text)
+
+    def set_team_detail(self, names: str):
+        self.team_picker.setText(names)
+        self.team_picker.setToolTip("当前团队：%s\n\n点一下打开配置" % names)
 
     def clear(self):
         self.input.clear()
@@ -1042,6 +1066,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AI 团队群聊")
         self.setMinimumSize(940, 660)
         self._set_icon()
+        self._build_menubar()
         self._build_ui()
         self._apply_default_geometry()
         self._register_secrets()
@@ -1097,10 +1122,23 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content.setObjectName("Content")
-        column = QVBoxLayout(content)
+        outer = QVBoxLayout(content)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._build_topbar(outer)
+
+        # 分段控件切两页：对话 / 团队
+        self.stack = QStackedWidget()
+        outer.addWidget(self.stack, stretch=1)
+
+        chat_page = QWidget()
+        column = QVBoxLayout(chat_page)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         self.column = column
+        self.stack.addWidget(chat_page)
+        self.team_page = self._build_team_page()
+        self.stack.addWidget(self.team_page)
 
         # 布局骨架：弹簧 / 空状态 / 消息区 / 输入区 / 弹簧
         # 空状态时两个弹簧都撑开，把「大标题 + 输入框 + 工具行」顶到竖直居中；
@@ -1127,6 +1165,189 @@ class MainWindow(QMainWindow):
         root.addWidget(content, stretch=1)
         self.setCentralWidget(central)
 
+    def _build_menubar(self):
+        """原生菜单栏（文件 / 编辑 / 视图 / 帮助），对齐 ChatGPT 桌面版。"""
+        bar = self.menuBar()
+        bar.setStyleSheet(
+            "QMenuBar { background: %s; color: %s; padding: 2px 6px; }"
+            "QMenuBar::item { padding: 5px 10px; border-radius: 6px; background: transparent; }"
+            "QMenuBar::item:selected { background: %s; }"
+            % (theme.MAIN, theme.TEXT, theme.SURFACE_HOVER))
+
+        file_menu = bar.addMenu("文件")
+        file_menu.addAction("新对话", self.start_new_conversation)
+        file_menu.addAction("导出诊断包", self.export_diagnostics_action)
+        file_menu.addSeparator()
+        file_menu.addAction("打开 AI 产出文件夹",
+                            lambda: open_in_explorer(app_config.documents_dir()))
+        file_menu.addAction("打开日志文件夹",
+                            lambda: open_in_explorer(app_config.logs_dir()))
+        file_menu.addSeparator()
+        file_menu.addAction("退出", self.close)
+
+        edit_menu = bar.addMenu("编辑")
+        edit_menu.addAction("复制", lambda: self._focus_widget_copy())
+        edit_menu.addAction("粘贴", lambda: self._focus_widget_paste())
+        edit_menu.addAction("全选", lambda: self._focus_widget_select_all())
+
+        view_menu = bar.addMenu("视图")
+        view_menu.addAction("对话", lambda: self._switch_page(0))
+        view_menu.addAction("团队", lambda: self._switch_page(1))
+        view_menu.addSeparator()
+        view_menu.addAction("配置角色与模型", self.open_config)
+
+        help_menu = bar.addMenu("帮助")
+        help_menu.addAction("关于", self._show_about)
+        help_menu.addAction("打开日志文件夹",
+                            lambda: open_in_explorer(app_config.logs_dir()))
+
+    def _focus_widget(self):
+        widget = QApplication.focusWidget()
+        return widget if hasattr(widget, "copy") else None
+
+    def _focus_widget_copy(self):
+        widget = self._focus_widget()
+        if widget:
+            widget.copy()
+
+    def _focus_widget_paste(self):
+        widget = self._focus_widget()
+        if widget:
+            widget.paste()
+
+    def _focus_widget_select_all(self):
+        widget = self._focus_widget()
+        if widget:
+            widget.selectAll()
+
+    def _show_about(self):
+        QMessageBox.information(
+            self, "关于",
+            "AI 团队群聊 · 桌面版\n\n"
+            "几个不同模型的 AI 在同一窗口里讨论、分工，可以一直追问。\n"
+            "配置、记录与日志都在：\n%s" % app_config.config_dir())
+
+    def _build_topbar(self, outer):
+        """顶部一条：中间分段控件（对话 / 团队），右边一个面板图标。"""
+        top = QWidget()
+        top.setFixedHeight(48)
+        row = QHBoxLayout(top)
+        row.setContentsMargins(theme.SPACE_XL, theme.SPACE_SM,
+                               theme.SPACE_XL, theme.SPACE_XS)
+        row.setSpacing(theme.SPACE_SM)
+
+        row.addStretch(1)
+
+        segmented = QFrame()
+        segmented.setObjectName("Segmented")
+        seg_row = QHBoxLayout(segmented)
+        seg_row.setContentsMargins(3, 3, 3, 3)
+        seg_row.setSpacing(2)
+        self.seg_buttons = []
+        for index, text in enumerate(("对话", "团队")):
+            seg = QPushButton(text)
+            seg.setObjectName("SegmentButton")
+            seg.setCheckable(True)
+            seg.setCursor(Qt.PointingHandCursor)
+            seg.clicked.connect(lambda _=False, i=index: self._switch_page(i))
+            seg_row.addWidget(seg)
+            self.seg_buttons.append(seg)
+        self.seg_buttons[0].setChecked(True)
+        row.addWidget(segmented)
+
+        row.addStretch(1)
+
+        panel_btn = QPushButton()
+        panel_btn.setProperty("role", "tool")
+        panel_btn.setIcon(QIcon(icons.grid(theme.TEXT_DIM, 18)))
+        panel_btn.setIconSize(icons.grid(theme.TEXT_DIM, 18).size())
+        panel_btn.setToolTip("配置角色与模型")
+        panel_btn.clicked.connect(self.open_config)
+        row.addWidget(panel_btn)
+        outer.addWidget(top)
+
+    def _switch_page(self, index: int):
+        self.stack.setCurrentIndex(index)
+        for i, seg in enumerate(self.seg_buttons):
+            seg.setChecked(i == index)
+        if index == 1:
+            self._refresh_team_page()
+
+    def _build_team_page(self):
+        """团队页：列出所有角色及其模型。
+
+        列宽必须跟对话页的消息列取同一个数（CHAT_MAX_WIDTH），否则来回切页
+        会觉得团队页"缩水"——之前只写了 setMaximumWidth，没有东西把宽度撑满，
+        内容就按 sizeHint 收缩成了 305px 一小坨。
+        定宽居中交给 CenteredPane：纯用 addStretch 居中会被 QHBoxLayout 按
+        stretch 因子平分宽度，内容反而更窄（见 CenteredPane 的说明）。
+        """
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, theme.SPACE_XXL, 0, theme.SPACE_XL)
+        layout.setSpacing(0)
+
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setContentsMargins(0, 0, 0, 0)
+        inner_layout.setSpacing(theme.SPACE_MD)
+
+        heading = label("团队", "heading")
+        heading.setAlignment(Qt.AlignCenter)
+        inner_layout.addWidget(heading)
+
+        self.team_summary = label("", "dim", wrap=True)
+        self.team_summary.setAlignment(Qt.AlignCenter)
+        inner_layout.addWidget(self.team_summary)
+
+        self.team_list = QWidget()
+        self.team_list_layout = QVBoxLayout(self.team_list)
+        self.team_list_layout.setContentsMargins(0, theme.SPACE_MD, 0, 0)
+        self.team_list_layout.setSpacing(theme.SPACE_XS)
+        inner_layout.addWidget(self.team_list)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(button("配置角色与模型", "primary", self.open_config))
+        buttons.addStretch(1)
+        inner_layout.addSpacing(theme.SPACE_SM)
+        inner_layout.addLayout(buttons)
+
+        layout.addWidget(CenteredPane(inner, max_width=theme.CHAT_MAX_WIDTH,
+                                      margin=theme.SPACE_XL))
+        layout.addStretch(1)
+        return page
+
+    def _refresh_team_page(self):
+        while self.team_list_layout.count():
+            item = self.team_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        roles = app_config.enabled_roles(self.settings)
+        self.team_summary.setText("按列表顺序轮流发言，共 %d 个角色" % len(roles))
+        for role in roles:
+            row = QFrame()
+            row.setStyleSheet(
+                "QFrame { background: %s; border: 1px solid %s; border-radius: 14px; }"
+                % (theme.SURFACE, theme.BORDER))
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(theme.SPACE_LG, theme.SPACE_MD,
+                                          theme.SPACE_LG, theme.SPACE_MD)
+            row_layout.setSpacing(theme.SPACE_MD)
+            mark = QLabel()
+            mark.setPixmap(icons.avatar(role_color(role), "", 26))
+            mark.setFixedSize(26, 26)
+            row_layout.addWidget(mark)
+            name = label(role.get("name") or "?", "title")
+            name.setStyleSheet("color: %s;" % role_color(role))
+            row_layout.addWidget(name)
+            row_layout.addStretch(1)
+            detail = label("%s · %s" % (SOURCE_SHORT.get(role.get("source", ""), "?"),
+                                        role.get("model") or "未选模型"), "dim")
+            row_layout.addWidget(detail)
+            self.team_list_layout.addWidget(row)
+
     def _build_composer_area(self, column):
         holder = QWidget()
         holder_layout = QVBoxLayout(holder)
@@ -1142,6 +1363,7 @@ class MainWindow(QMainWindow):
         self.composer.submitted.connect(self.send_task)
         self.composer.stop_requested.connect(self.stop)
         self.composer.new_btn.clicked.connect(self.start_new_conversation)
+        self.composer.team_picker.clicked.connect(self.open_config)
         inner_layout.addWidget(self.composer)
 
         # 输入框下方那排小工具（仿 ChatGPT 的 文件 / 插件 那一行）
@@ -1160,16 +1382,29 @@ class MainWindow(QMainWindow):
         tools.addStretch(1)
         self.status = label("就绪", "faint")
         tools.addWidget(self.status)
+        monitor_btn = QPushButton()
+        monitor_btn.setProperty("role", "tool")
+        monitor_btn.setIcon(QIcon(icons.monitor(theme.TEXT_DIM, 16)))
+        monitor_btn.setIconSize(icons.monitor(theme.TEXT_DIM, 16).size())
+        monitor_btn.setToolTip("打开 AI 产出文件夹")
+        monitor_btn.clicked.connect(
+            lambda: open_in_explorer(app_config.documents_dir()))
+        tools.addWidget(monitor_btn)
         inner_layout.addWidget(tool_row)
 
-        pane = CenteredPane(inner, margin=theme.SPACE_XL)
+        # 输入框这一列必须和上面消息列同宽（都用 CHAT_MAX_WIDTH）。
+        # 之前用的是 CenteredPane 的默认值 CONTENT_MAX_WIDTH=1100，
+        # 结果输入框比它上方的对话内容宽出 300px，整屏看着是两套列宽。
+        pane = CenteredPane(inner, max_width=theme.CHAT_MAX_WIDTH,
+                            margin=theme.SPACE_XL)
         holder_layout.addWidget(pane)
         column.addWidget(holder)
 
     def _refresh_team_label(self):
         roles = app_config.enabled_roles(self.settings)
         names = "、".join(r.get("name") or "?" for r in roles)
-        self.composer.set_team_text("%d 个角色 · %s" % (len(roles), names))
+        self.composer.set_team_text("%d 个角色" % len(roles))
+        self.composer.set_team_detail(names)
 
     # ── 空状态 / 对话中 两种骨架 ──
     def _set_empty_layout(self, empty: bool):

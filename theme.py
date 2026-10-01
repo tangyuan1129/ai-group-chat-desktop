@@ -230,6 +230,20 @@ QScrollBar::handle:horizontal {{
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
+/* ── 分段控件（仿 ChatGPT 顶部 聊天/工作）── */
+QFrame#Segmented {{
+    background: rgba(255, 255, 255, 0.06);
+    border: none; border-radius: 18px;
+}}
+QPushButton#SegmentButton {{
+    background: transparent; color: {TEXT_DIM};
+    border: none; border-radius: 15px;
+    padding: 0 18px; font-size: 9.5pt; font-weight: 600;
+    min-height: 30px;
+}}
+QPushButton#SegmentButton:hover {{ color: {TEXT}; }}
+QPushButton#SegmentButton:checked {{ background: {SURFACE_ACTIVE}; color: {TEXT}; }}
+
 /* ── 面板 ── */
 QFrame#UserBubble {{
     background: {BUBBLE_USER}; border: none; border-radius: {RADIUS_LG}px;

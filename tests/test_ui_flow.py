@@ -242,6 +242,72 @@ check("出错后状态栏提示", "出错" in win.status.text(), win.status.text
 check("弹窗指出了具体角色", any("工程师" in p for p in POPUPS), str(POPUPS)[:200])
 win.close()
 
+print()
+print("=" * 72)
+print("I. 界面骨架：顶部两个页签，整屏只有一个列宽")
+print("=" * 72)
+win, holder = new_window()
+win.resize(1040, 720)
+win.show()
+pump(0.8)
+
+menu = [a.text() for a in win.menuBar().actions()]
+check("菜单栏是文件/编辑/视图/帮助", menu == ["文件", "编辑", "视图", "帮助"], str(menu))
+check("顶部分段是对话/团队", [b.text() for b in win.seg_buttons] == ["对话", "团队"],
+      str([b.text() for b in win.seg_buttons]))
+check("默认停在对话页", win.stack.currentIndex() == 0, str(win.stack.currentIndex()))
+
+# 这两条是拿血换来的：消息列曾是 820、输入框列是 1100，同屏两套列宽；
+# 团队页曾经因为只写了 setMaximumWidth 而塌成 305px。都别再退回去。
+# 空状态的消息区是隐藏的，量不到宽度，所以先跟设计常量对，再进对话态量真的。
+check("输入框列宽就是设计里的聊天列宽", win.composer.width() == theme.CHAT_MAX_WIDTH,
+      "输入框=%d 期望=%d" % (win.composer.width(), theme.CHAT_MAX_WIDTH))
+
+win.seg_buttons[1].click()
+pump(0.6)
+check("点「团队」切到团队页", win.stack.currentIndex() == 1, str(win.stack.currentIndex()))
+
+rows = [win.team_list_layout.itemAt(i).widget()
+        for i in range(win.team_list_layout.count())]
+rows = [r for r in rows if r is not None]
+roles = app_config.enabled_roles(win.settings)
+check("团队页列出全部启用角色", len(rows) == len(roles),
+      "行=%d 角色=%d" % (len(rows), len(roles)))
+
+if rows:
+    check("团队页行宽也是同一条聊天列宽", rows[0].width() == theme.CHAT_MAX_WIDTH,
+          "行=%d 期望=%d" % (rows[0].width(), theme.CHAT_MAX_WIDTH))
+
+row_text = "\n".join(lbl.text() for r in rows for lbl in r.findChildren(QLabel) if lbl.text())
+check("每个角色的角色名都在团队页上",
+      all((r.get("name") or "?") in row_text for r in roles), row_text[:200])
+check("每个角色的模型都在团队页上",
+      all((r.get("model") or "\0") in row_text for r in roles), row_text[:200])
+check("摘要说了发言顺序", "按列表顺序" in win.team_summary.text(), win.team_summary.text())
+
+# 来回切页不能越切越多（团队页每次重进都要重建列表）
+win.seg_buttons[0].click()
+pump(0.3)
+check("点「对话」切回对话页", win.stack.currentIndex() == 0, str(win.stack.currentIndex()))
+win.seg_buttons[1].click()
+pump(0.6)
+again = [win.team_list_layout.itemAt(i).widget()
+         for i in range(win.team_list_layout.count())]
+check("来回切页后角色行数不变", len([r for r in again if r is not None]) == len(roles),
+      "%d 行" % len([r for r in again if r is not None]))
+
+# 真的聊一轮，看消息列和输入框是不是落在同一条列宽上
+win.seg_buttons[0].click()
+pump(0.3)
+win.send_task("量一下消息列宽")
+pump(10.0, until=lambda: win.area.column.width() > 0)
+check("消息列就是同一条聊天列宽", win.area.column.width() == theme.CHAT_MAX_WIDTH,
+      "消息列=%d 期望=%d" % (win.area.column.width(), theme.CHAT_MAX_WIDTH))
+check("输入框和消息列同宽", win.composer.width() == win.area.column.width(),
+      "消息列=%d 输入框=%d" % (win.area.column.width(), win.composer.width()))
+pump(10.0, until=lambda: win.composer.input.isEnabled())
+win.close()
+
 shutil.rmtree(_TMP, ignore_errors=True)
 
 failed = [n for n, ok in RESULTS if not ok]

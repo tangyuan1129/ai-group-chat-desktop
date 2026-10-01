@@ -9,7 +9,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 
 __all__ = ["plus", "clock", "people", "sliders", "dots", "folder", "file",
-           "gear", "arrow_up", "square_stop"]
+           "gear", "arrow_up", "square_stop", "monitor", "grid", "chevron_down",
+           "avatar"]
 
 
 def _canvas(size: int):
@@ -181,11 +182,77 @@ def square_stop(color: str, size: int = 14) -> QPixmap:
     return pixmap
 
 
+def monitor(color: str, size: int = 16) -> QPixmap:
+    """显示器 —— ChatGPT 工具行最右边那个。"""
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color, size, weight=1.3))
+    painter.drawRoundedRect(
+        QRectF(size * 0.10, size * 0.20, size * 0.80, size * 0.50),
+        size * 0.10, size * 0.10)
+    painter.drawLine(QPointF(size * 0.34, size * 0.82), QPointF(size * 0.66, size * 0.82))
+    painter.drawLine(QPointF(size * 0.50, size * 0.70), QPointF(size * 0.50, size * 0.82))
+    painter.end()
+    return pixmap
+
+
+def grid(color: str, size: int = 16) -> QPixmap:
+    """田字格 —— ChatGPT 右上角那个面板图标。"""
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color, size, weight=1.3))
+    gap = size * 0.10
+    half = (size - gap * 3) / 2.0
+    for row in range(2):
+        for col in range(2):
+            painter.drawRoundedRect(
+                QRectF(gap + col * (half + gap), gap + row * (half + gap), half, half),
+                size * 0.08, size * 0.08)
+    painter.end()
+    return pixmap
+
+
+def chevron_down(color: str, size: int = 14) -> QPixmap:
+    pixmap, painter = _canvas(size)
+    painter.setPen(_pen(color, size, weight=1.5))
+    mid = size / 2.0
+    painter.drawLine(QPointF(size * 0.28, size * 0.42), QPointF(mid, size * 0.62))
+    painter.drawLine(QPointF(mid, size * 0.62), QPointF(size * 0.72, size * 0.42))
+    painter.end()
+    return pixmap
+
+
+def avatar(color: str, initials: str, size: int = 30) -> QPixmap:
+    """圆形头像 —— 图标栏最底下那两个。"""
+    from PySide6.QtGui import QFont
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(QColor(color))
+    painter.setPen(Qt.NoPen)
+    painter.drawEllipse(0, 0, size, size)
+    if initials:
+        painter.setPen(QColor("#FFFFFF"))
+        font = QFont("Microsoft YaHei UI", max(6, int(size * 0.32)))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, initials)
+    painter.end()
+    return pixmap
+
+
 if __name__ == "__main__":
     import os
+    import sys
+
+    from PySide6.QtGui import QGuiApplication
+    # QPixmap 必须先有 app 才能构造，否则直接崩（这里以前就是这么崩的）
+    QGuiApplication.instance() or QGuiApplication(sys.argv)
+
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_icon_preview")
     os.makedirs(out, exist_ok=True)
     for name in __all__:
-        pixmap = globals()[name]("#ECECEC", 40)
+        # 头像多一个"缩写"参数，不能按统一的 (颜色, 尺寸) 调
+        pixmap = (globals()[name]("#ECECEC", "AI", 40) if name == "avatar"
+                  else globals()[name]("#ECECEC", 40))
         pixmap.save(os.path.join(out, "%s.png" % name))
     print("已输出预览图到 %s" % out)

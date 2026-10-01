@@ -55,10 +55,10 @@ pip install -r requirements.txt
 
 ![主界面](screenshots/main.png)
 
-<!-- 群聊讨论截图还没补上：需要一次真实讨论才能截。
-     配好模型后运行 python tests/capture_ui_states.py，
-     它会同时产出 screenshots/main.png，讨论中的画面可存成 discussion.png。
-     在那之前这里先注释掉，免得首页显示碎图。 -->
+<!-- 群聊讨论截图还没补上：capture_ui_states.py 里那份讨论是 FakeTeam 编的
+     占位发言（存在 _ui_shots/2_running.png），拿它当宣传图是骗人的。
+     要补得跑一次真实讨论：配好模型，自己聊一轮，把截图存成
+     screenshots/discussion.png，再放开下面这行。 -->
 <!-- ![群聊讨论](screenshots/discussion.png) -->
 
 ## 💡 用法
