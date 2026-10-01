@@ -86,6 +86,17 @@ def button(text, role="", on_click=None) -> QPushButton:
     return widget
 
 
+def tool_button(text, pixmap, on_click=None) -> QPushButton:
+    """输入框下方那排小工具：图标 + 文字。"""
+    widget = QPushButton(text)
+    widget.setProperty("role", "tool")
+    widget.setIcon(QIcon(pixmap))
+    widget.setIconSize(pixmap.size())
+    if on_click:
+        widget.clicked.connect(on_click)
+    return widget
+
+
 def icon_button(pixmap, tooltip, on_click=None, checkable=False) -> QPushButton:
     widget = QPushButton()
     widget.setObjectName("RailButton")
@@ -125,13 +136,14 @@ class UserMessage(QWidget):
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 6, 0, 6)
+        row.setContentsMargins(0, theme.SPACE_SM, 0, theme.SPACE_SM)
         row.addStretch(1)
         bubble = QFrame()
         bubble.setObjectName("UserBubble")
         bubble.setMaximumWidth(int(theme.CHAT_MAX_WIDTH * 0.72))
         inner = QVBoxLayout(bubble)
-        inner.setContentsMargins(16, 10, 16, 10)
+        inner.setContentsMargins(theme.SPACE_LG, theme.SPACE_MD,
+                                 theme.SPACE_LG, theme.SPACE_MD)
         body = label(text, "body", wrap=True, selectable=True)
         body.setFont(body_font())
         body.setFixedWidth(measure_text(text, BUBBLE_TEXT_MAX))
@@ -149,11 +161,11 @@ class AssistantMessage(QWidget):
         super().__init__(parent)
         self._buffer = ""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 8)
-        layout.setSpacing(5)
+        layout.setContentsMargins(0, theme.SPACE_SM, 0, theme.SPACE_SM)
+        layout.setSpacing(theme.SPACE_XS)
 
         head = QHBoxLayout()
-        head.setSpacing(7)
+        head.setSpacing(theme.SPACE_SM)
         mark = QLabel()
         mark.setPixmap(icons.dots(color, 12))
         mark.setFixedSize(12, 12)
@@ -186,7 +198,7 @@ class ToolMessage(QWidget):
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 1, 0, 1)
+        layout.setContentsMargins(theme.SPACE_LG, 1, 0, 1)
         line = label(text, "faint", wrap=True)
         layout.addWidget(line)
         layout.addStretch(1)
@@ -196,7 +208,7 @@ class SystemMessage(QWidget):
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 6, 0, 6)
+        layout.setContentsMargins(0, theme.SPACE_SM, 0, theme.SPACE_SM)
         line = label(text, "faint", wrap=True)
         layout.addWidget(line)
         layout.addStretch(1)
@@ -213,8 +225,9 @@ class NoticeMessage(QWidget):
             "QFrame { background: %s; border: 1px solid %s; border-radius: 14px; }"
             % (theme.SURFACE, theme.BORDER))
         inner = QHBoxLayout(frame)
-        inner.setContentsMargins(16, 12, 12, 12)
-        inner.setSpacing(10)
+        inner.setContentsMargins(theme.SPACE_LG, theme.SPACE_MD,
+                                 theme.SPACE_MD, theme.SPACE_MD)
+        inner.setSpacing(theme.SPACE_MD)
         body = label(text, "dim", wrap=True)
         if width:
             self.setFixedWidth(width)
@@ -222,7 +235,7 @@ class NoticeMessage(QWidget):
         inner.addWidget(body, stretch=1)
         inner.addWidget(button(action_text, "primary", on_action))
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 8, 0, 8)
+        outer.setContentsMargins(0, theme.SPACE_SM, 0, theme.SPACE_SM)
         outer.addWidget(frame)
 
 
@@ -234,7 +247,7 @@ class CenteredPane(QWidget):
     """
 
     def __init__(self, inner: QWidget, max_width: int = None,
-                 margin: int = 24, parent=None):
+                 margin: int = theme.SPACE_XL, parent=None):
         super().__init__(parent)
         self._max_width = max_width or theme.CONTENT_MAX_WIDTH
         self._margin = margin
@@ -263,7 +276,7 @@ class MessageArea(QScrollArea):
 
         container = QWidget()
         outer = QHBoxLayout(container)
-        outer.setContentsMargins(24, 16, 24, 8)
+        outer.setContentsMargins(theme.SPACE_XL, theme.SPACE_LG, theme.SPACE_XL, theme.SPACE_SM)
         outer.setSpacing(0)
         outer.addStretch(1)
 
@@ -280,7 +293,7 @@ class MessageArea(QScrollArea):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        available = max(280, self.viewport().width() - 48)
+        available = max(280, self.viewport().width() - theme.SPACE_XL * 2)
         self.column.setFixedWidth(min(theme.CHAT_MAX_WIDTH, available))
 
     def _insert(self, widget: QWidget):
@@ -341,22 +354,22 @@ class IconRail(QWidget):
         self.setFixedWidth(theme.RAIL_WIDTH)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(6)
+        root.setContentsMargins(theme.SPACE_LG, theme.SPACE_LG, theme.SPACE_LG, theme.SPACE_LG)
+        root.setSpacing(theme.SPACE_XS)
 
-        self.home_btn = icon_button(icons.plus(theme.TEXT, 20), "新对话",
+        self.home_btn = icon_button(icons.plus(theme.TEXT, 22), "新对话",
                                     self.new_chat.emit, checkable=True)
         self.home_btn.setChecked(True)
         root.addWidget(self.home_btn, alignment=Qt.AlignHCenter)
 
-        root.addWidget(icon_button(icons.clock(theme.TEXT_DIM, 20), "历史记录",
+        root.addWidget(icon_button(icons.clock(theme.TEXT_DIM, 22), "历史记录",
                                    self.open_history.emit), alignment=Qt.AlignHCenter)
-        root.addWidget(icon_button(icons.people(theme.TEXT_DIM, 20), "团队成员与配置",
+        root.addWidget(icon_button(icons.people(theme.TEXT_DIM, 22), "团队成员与配置",
                                    self.open_config.emit), alignment=Qt.AlignHCenter)
-        root.addWidget(icon_button(icons.folder(theme.TEXT_DIM, 20), "打开 AI 产出文件夹",
+        root.addWidget(icon_button(icons.folder(theme.TEXT_DIM, 22), "打开 AI 产出文件夹",
                                    self.open_output.emit), alignment=Qt.AlignHCenter)
 
-        self.more_btn = icon_button(icons.dots(theme.TEXT_DIM, 20), "更多")
+        self.more_btn = icon_button(icons.dots(theme.TEXT_DIM, 22), "更多")
         menu = QMenu(self)
         menu.addAction("导出诊断包（含日志，已脱敏）", self._emit_more)
         menu.addAction("打开日志文件夹", self._emit_more)
@@ -365,7 +378,7 @@ class IconRail(QWidget):
 
         root.addStretch(1)
 
-        root.addWidget(icon_button(icons.sliders(theme.TEXT_DIM, 20), "设置",
+        root.addWidget(icon_button(icons.sliders(theme.TEXT_DIM, 22), "设置",
                                    self.open_config.emit), alignment=Qt.AlignHCenter)
 
     def _emit_more(self):
@@ -393,8 +406,9 @@ class Composer(QFrame):
         self.running = False
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 16, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(theme.SPACE_XL, theme.SPACE_LG,
+                                 theme.SPACE_LG, theme.SPACE_MD)
+        root.setSpacing(theme.SPACE_MD)
 
         self.input = QLineEdit()
         self.input.setPlaceholderText("给团队发个任务…")
@@ -402,12 +416,12 @@ class Composer(QFrame):
         root.addWidget(self.input)
 
         controls = QHBoxLayout()
-        controls.setSpacing(8)
+        controls.setSpacing(theme.SPACE_SM)
 
         self.new_btn = QPushButton()
-        self.new_btn.setIcon(QIcon(icons.plus(theme.TEXT_DIM, 18)))
-        self.new_btn.setIconSize(icons.plus(theme.TEXT_DIM, 18).size())
-        self.new_btn.setFixedSize(30, 30)
+        self.new_btn.setIcon(QIcon(icons.plus(theme.TEXT_DIM, 20)))
+        self.new_btn.setIconSize(icons.plus(theme.TEXT_DIM, 20).size())
+        self.new_btn.setFixedSize(34, 34)
         self.new_btn.setToolTip("新对话")
         controls.addWidget(self.new_btn)
 
@@ -417,8 +431,8 @@ class Composer(QFrame):
 
         self.send_btn = QPushButton()
         self.send_btn.setObjectName("SendButton")
-        self.send_btn.setIcon(QIcon(icons.arrow_up(theme.ACCENT_TEXT, 18)))
-        self.send_btn.setIconSize(icons.arrow_up(theme.ACCENT_TEXT, 18).size())
+        self.send_btn.setIcon(QIcon(icons.arrow_up(theme.ACCENT_TEXT, 20)))
+        self.send_btn.setIconSize(icons.arrow_up(theme.ACCENT_TEXT, 20).size())
         self.send_btn.setToolTip("发送")
         self.send_btn.clicked.connect(self._submit)
         controls.addWidget(self.send_btn)
@@ -1096,7 +1110,7 @@ class MainWindow(QMainWindow):
 
         self.empty_block = QWidget()
         self.empty_layout = QVBoxLayout(self.empty_block)
-        self.empty_layout.setContentsMargins(24, 0, 24, 0)
+        self.empty_layout.setContentsMargins(theme.SPACE_XL, 0, theme.SPACE_XL, 0)
         self.empty_layout.setSpacing(0)
         column.addWidget(self.empty_block)
 
@@ -1116,13 +1130,13 @@ class MainWindow(QMainWindow):
     def _build_composer_area(self, column):
         holder = QWidget()
         holder_layout = QVBoxLayout(holder)
-        holder_layout.setContentsMargins(0, 6, 0, 14)
-        holder_layout.setSpacing(8)
+        holder_layout.setContentsMargins(0, theme.SPACE_SM, 0, theme.SPACE_LG)
+        holder_layout.setSpacing(theme.SPACE_SM)
 
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
         inner_layout.setContentsMargins(0, 0, 0, 0)
-        inner_layout.setSpacing(8)
+        inner_layout.setSpacing(theme.SPACE_SM)
 
         self.composer = Composer()
         self.composer.submitted.connect(self.send_task)
@@ -1134,18 +1148,21 @@ class MainWindow(QMainWindow):
         tool_row = QFrame()
         tool_row.setObjectName("ToolRow")
         tools = QHBoxLayout(tool_row)
-        tools.setContentsMargins(14, 6, 14, 6)
-        tools.setSpacing(4)
-        tools.addWidget(button("AI 产出文件夹", "tool",
-                               lambda: open_in_explorer(app_config.documents_dir())))
-        tools.addWidget(button("历史记录", "tool", self.open_history))
-        tools.addWidget(button("配置角色", "tool", self.open_config))
+        tools.setContentsMargins(theme.SPACE_SM, theme.SPACE_XS,
+                                 theme.SPACE_SM, theme.SPACE_XS)
+        tools.setSpacing(theme.SPACE_XS)
+        tools.addWidget(tool_button("AI 产出文件夹", icons.folder(theme.TEXT_DIM, 16),
+                                    lambda: open_in_explorer(app_config.documents_dir())))
+        tools.addWidget(tool_button("历史记录", icons.clock(theme.TEXT_DIM, 16),
+                                    self.open_history))
+        tools.addWidget(tool_button("配置角色", icons.people(theme.TEXT_DIM, 16),
+                                    self.open_config))
         tools.addStretch(1)
         self.status = label("就绪", "faint")
         tools.addWidget(self.status)
         inner_layout.addWidget(tool_row)
 
-        pane = CenteredPane(inner, margin=24)
+        pane = CenteredPane(inner, margin=theme.SPACE_XL)
         holder_layout.addWidget(pane)
         column.addWidget(holder)
 
@@ -1176,10 +1193,10 @@ class MainWindow(QMainWindow):
         """
         self._clear_layout(self.empty_layout)
 
-        heading = label("我们要做什么？", "heading")
+        heading = label("我们要做什么？", "display")
         heading.setAlignment(Qt.AlignCenter)
         self.empty_layout.addWidget(heading)
-        self.empty_layout.addSpacing(26)
+        self.empty_layout.addSpacing(theme.SPACE_XXL)
 
         problems = self.load_result.problems
         if problems:
