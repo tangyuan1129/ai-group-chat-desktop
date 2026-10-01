@@ -26,8 +26,12 @@ UninstallDisplayName={#MyAppName} 卸载
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir=..\
-; 文件名用短版本号（v1.2），跟 README 里的下载名一致
-OutputBaseFilename=AI团队群聊-安装程序-v1.2
+; 文件名用英文 + 短版本号，跟 GitHub Release 上的资产名一一对应。
+; 为什么不能用中文名：GitHub 会把资产名里的非 ASCII 字符换成点，
+; "AI团队群聊-安装程序-v1.2.exe" 上传后变成 "AI.-.-v1.2.exe"，
+; 于是 README 里写的下载名和用户在 Release 页看到的对不上（v1.1 就这么错了一版）。
+; 本地构建产物直接叫这个名字，发版时不需要再手工改名。
+OutputBaseFilename=AI-Group-Chat-Setup-v1.2
 ; 管理员权限（写 D 盘根目录需要）
 PrivilegesRequired=admin
 ; 支持中文

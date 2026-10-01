@@ -30,7 +30,7 @@
 
 ### 方式一:最省事(推荐)
 
-去 [Releases 页面](https://github.com/tangyuan1129/ai-group-chat-desktop/releases) 下载 `AI团队群聊-安装程序-v1.2.exe`,双击安装就行。不需要自己配 Python 环境。
+去 [Releases 页面](https://github.com/tangyuan1129/ai-group-chat-desktop/releases) 下载 `AI-Group-Chat-Setup-v1.2.exe`,双击安装就行。不需要自己配 Python 环境。
 
 ### 方式二:源码运行
 
@@ -125,6 +125,11 @@ pyinstaller pack.spec --noconfirm
 ```
 
 产物在 `dist\AI团队群聊\`。要出安装包再用 Inno Setup 6 编译 `install.iss`。
+
+安装包会生成在项目**上一层目录**,文件名就是 Release 上那个英文名
+(`AI-Group-Chat-Setup-v<版本>.exe`)。别改成中文名 —— GitHub 会把资产名里的非 ASCII
+字符统统换成点,`AI团队群聊-安装程序-v1.2.exe` 上传后变成 `AI.-.-v1.2.exe`,
+用户按 README 里的名字根本找不到文件(v1.1 就这么错过一版)。
 
 ## 📄 License
 
