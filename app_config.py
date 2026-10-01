@@ -32,7 +32,7 @@ APP_NAME = "AI团队群聊"
 # tests/test_config.py 的 I 节会拿这两处对账，对不上直接报错。
 # 之前没有这个常量：装出去的 v1.1 包内嵌版本其实还是 1.0.0，用户报问题
 # 说不清自己用的是哪版，诊断包里也看不到。
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 CONFIG_VERSION = 3
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))

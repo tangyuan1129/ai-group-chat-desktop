@@ -242,10 +242,16 @@ if _iss_ver:
 _iss_out = re.search(r"OutputBaseFilename=(.+)$", _iss, re.MULTILINE)
 check("安装包文件名里带版本号", _iss_out is not None)
 if _iss_out:
-    _short = ".".join(app_config.APP_VERSION.split(".")[:2])
-    check("安装包文件名用的是短版本号（v%s）" % _short,
-          _iss_out.group(1).strip().endswith("v" + _short),
-          _iss_out.group(1).strip())
+    _name = _iss_out.group(1).strip()
+    _ver_in_name = re.search(r"v(\d+(?:\.\d+)*)$", _name)
+    check("安装包文件名里能解析出版本号", _ver_in_name is not None, _name)
+    if _ver_in_name:
+        check("文件名里的版本号跟 APP_VERSION 同源",
+              app_config.APP_VERSION.startswith(_ver_in_name.group(1)),
+              "文件名=%s APP_VERSION=%s" % (_name, app_config.APP_VERSION))
+    # v1.1 踩过：GitHub 把资产名里的非 ASCII 字符换成点，
+    # AI团队群聊-安装程序-v1.2.exe 变成 AI.-.-v1.2.exe，README 里的下载名直接找不到文件。
+    check("安装包文件名是纯 ASCII", _name.isascii(), _name)
 
 check("VersionInfoVersion 跟 MyAppVersion 同源",
       "VersionInfoVersion={#MyAppVersion}" in _iss,
