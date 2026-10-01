@@ -381,18 +381,6 @@ class IconRail(QWidget):
         root.addWidget(icon_button(icons.sliders(theme.TEXT_DIM, 22), "设置",
                                    self.open_config.emit), alignment=Qt.AlignHCenter)
 
-        # 底部两个圆形头像（仿 ChatGPT 左下角）
-        avatars = QHBoxLayout()
-        avatars.setSpacing(theme.SPACE_XS)
-        avatars.addStretch(1)
-        for color, initials in (("#8B6CE0", ""), ("#C08A3E", "AI")):
-            mark = QLabel()
-            mark.setPixmap(icons.avatar(color, initials, 28))
-            mark.setFixedSize(28, 28)
-            avatars.addWidget(mark)
-        avatars.addStretch(1)
-        root.addLayout(avatars)
-
     def _emit_more(self):
         self.open_output.emit()
 
