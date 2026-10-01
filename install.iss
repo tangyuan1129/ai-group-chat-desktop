@@ -4,7 +4,7 @@
 #define MyAppName "AI团队群聊"
 ; 改版本号时三处一起改：这里的 MyAppVersion、下面的 OutputBaseFilename、
 ; 以及 app_config.py 的 APP_VERSION。tests/test_config.py 的 I 节会拿它们对账。
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.2.2"
 #define MyAppPublisher "J1129"
 #define MyAppExeName "AI团队群聊.exe"
 #define MyAppAssocName MyAppName + " 文件"
@@ -31,7 +31,7 @@ OutputDir=..\
 ; "AI团队群聊-安装程序-v1.2.exe" 上传后变成 "AI.-.-v1.2.exe"，
 ; 于是 README 里写的下载名和用户在 Release 页看到的对不上（v1.1 就这么错了一版）。
 ; 本地构建产物直接叫这个名字，发版时不需要再手工改名。
-OutputBaseFilename=AI-Group-Chat-Setup-v1.2.1
+OutputBaseFilename=AI-Group-Chat-Setup-v1.2.2
 ; 管理员权限（写 D 盘根目录需要）
 PrivilegesRequired=admin
 ; 支持中文

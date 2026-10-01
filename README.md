@@ -30,7 +30,7 @@
 
 ### 方式一:最省事(推荐)
 
-去 [Releases 页面](https://github.com/tangyuan1129/ai-group-chat-desktop/releases) 下载 `AI-Group-Chat-Setup-v1.2.1.exe`,双击安装就行。不需要自己配 Python 环境。
+去 [Releases 页面](https://github.com/tangyuan1129/ai-group-chat-desktop/releases) 下载 `AI-Group-Chat-Setup-v1.2.2.exe`,双击安装就行。不需要自己配 Python 环境。
 
 ### 方式二:源码运行
 
